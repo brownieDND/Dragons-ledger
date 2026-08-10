@@ -63,6 +63,13 @@ export default function RootLayout() {
             title: "Ledger",
           }}
         />
+
+        <Stack.Screen
+          name="campaign/[id]/party-fund"
+          options={{
+            title: "Party Fund",
+          }}
+        />
       </Stack>
     </CampaignProvider>
   );

@@ -1,19 +1,19 @@
 import { router, useLocalSearchParams } from "expo-router";
 
 import {
-    Pressable,
-    SafeAreaView,
-    ScrollView,
-    StyleSheet,
-    Text,
-    View,
+  Pressable,
+  SafeAreaView,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
 } from "react-native";
 
 import { useCampaigns } from "../../context/CampaignContext";
 
 import {
-    getWalletBalance,
-    getWalletTotalBaseValue,
+  getWalletBalance,
+  getWalletTotalBaseValue,
 } from "../../models/Currency";
 
 export default function CampaignDashboardScreen() {
@@ -21,7 +21,8 @@ export default function CampaignDashboardScreen() {
     id: string;
   }>();
 
-  const { getCampaignById, getCampaignTransactions } = useCampaigns();
+  const { getCampaignById, getCampaignTransactions, getCampaignRewards } =
+    useCampaigns();
 
   const campaign = getCampaignById(id);
 
@@ -48,12 +49,21 @@ export default function CampaignDashboardScreen() {
     (a, b) => b.displayOrder - a.displayOrder,
   );
 
-  const totalBaseValue = getWalletTotalBaseValue(
+  const characterTotal = getWalletTotalBaseValue(
     character.wallet,
     campaign.currencySystem,
   );
 
+  const partyFundTotal = getWalletTotalBaseValue(
+    campaign.partyFund.wallet,
+    campaign.currencySystem,
+  );
+
   const recentTransactions = getCampaignTransactions(campaign.id).slice(0, 5);
+
+  const recentRewards = getCampaignRewards(campaign.id);
+
+  const latestReward = recentRewards[0];
 
   function getCurrencyAbbreviation(currencyId: string) {
     return (
@@ -70,6 +80,12 @@ export default function CampaignDashboardScreen() {
           <Text style={styles.campaignName}>{campaign.name}</Text>
 
           <Text style={styles.characterName}>Playing as {character.name}</Text>
+
+          <Text style={styles.modeText}>
+            {campaign.campaignType === "solo"
+              ? "Solo Campaign"
+              : `Multiplayer Campaign • ${campaign.members.length} members`}
+          </Text>
         </View>
 
         <Text style={styles.sectionTitle}>Character Wallet</Text>
@@ -87,7 +103,7 @@ export default function CampaignDashboardScreen() {
             <View style={styles.wealthBox}>
               <Text style={styles.wealthLabel}>Base Value</Text>
 
-              <Text style={styles.wealthValue}>{totalBaseValue}</Text>
+              <Text style={styles.wealthValue}>{characterTotal}</Text>
             </View>
           </View>
 
@@ -114,6 +130,7 @@ export default function CampaignDashboardScreen() {
             onPress={() =>
               router.push({
                 pathname: "/campaign/[id]/transaction",
+
                 params: {
                   id: campaign.id,
                 },
@@ -124,11 +141,93 @@ export default function CampaignDashboardScreen() {
           </Pressable>
         </View>
 
+        <Text style={styles.sectionTitle}>Rewards</Text>
+
+        <Pressable
+          style={styles.rewardCard}
+          onPress={() =>
+            router.push({
+              pathname: "/campaign/[id]/reward",
+
+              params: {
+                id: campaign.id,
+              },
+            })
+          }
+        >
+          <View style={styles.cardText}>
+            <Text style={styles.rewardTitle}>Distribute Reward</Text>
+
+            <Text style={styles.rewardDescription}>
+              Split rewards between characters and the Party Fund
+            </Text>
+          </View>
+
+          <Text style={styles.navigationArrow}>→</Text>
+        </Pressable>
+
+        {latestReward ? (
+          <View style={styles.latestRewardCard}>
+            <Text style={styles.latestRewardLabel}>Latest Reward</Text>
+
+            <Text style={styles.latestRewardDescription}>
+              {latestReward.description}
+            </Text>
+
+            <Text style={styles.latestRewardAmount}>
+              {latestReward.grossAmount}{" "}
+              {getCurrencyAbbreviation(latestReward.currencyId)}
+            </Text>
+
+            <Text style={styles.latestRewardSplit}>
+              {latestReward.amountPerRecipient}{" "}
+              {getCurrencyAbbreviation(latestReward.currencyId)} each to{" "}
+              {latestReward.recipientCount}{" "}
+              {latestReward.recipientCount === 1 ? "character" : "characters"} •{" "}
+              {latestReward.totalPartyFundAmount}{" "}
+              {getCurrencyAbbreviation(latestReward.currencyId)} to Party Fund
+            </Text>
+          </View>
+        ) : null}
+
+        <Text style={styles.sectionTitle}>Party Fund</Text>
+
+        <Pressable
+          style={styles.partyFundCard}
+          onPress={() =>
+            router.push({
+              pathname: "/campaign/[id]/party-fund",
+
+              params: {
+                id: campaign.id,
+              },
+            })
+          }
+        >
+          <View style={styles.cardText}>
+            <Text style={styles.partyFundTitle}>Shared Treasury</Text>
+
+            <Text style={styles.partyFundDescription}>
+              View and manage shared party currency
+            </Text>
+          </View>
+
+          <View style={styles.partyFundValueBox}>
+            <Text style={styles.partyFundValue}>{partyFundTotal}</Text>
+
+            <Text style={styles.partyFundBaseLabel}>base value</Text>
+          </View>
+        </Pressable>
+
         <View style={styles.grid}>
           <DashboardCard
-            title="Party Fund"
-            value="0"
-            description="Shared party currency"
+            title="Members"
+            value={`${campaign.members.length}`}
+            description={
+              campaign.campaignType === "solo"
+                ? "Solo campaign"
+                : "Campaign members"
+            }
           />
 
           <DashboardCard
@@ -152,7 +251,8 @@ export default function CampaignDashboardScreen() {
               <Text style={styles.activityEmpty}>No transactions yet.</Text>
 
               <Text style={styles.activityDescription}>
-                Rewards, purchases, trades, and transfers will appear here.
+                Rewards, purchases, Party Fund activity, trades, and transfers
+                will appear here.
               </Text>
             </>
           ) : (
@@ -164,7 +264,9 @@ export default function CampaignDashboardScreen() {
                   </Text>
 
                   <Text style={styles.transactionType}>
-                    {formatTransactionType(transaction.type)}
+                    {transaction.accountType === "party-fund"
+                      ? "Party Fund"
+                      : formatTransactionType(transaction.type)}
                   </Text>
                 </View>
 
@@ -190,11 +292,26 @@ export default function CampaignDashboardScreen() {
 
         <View style={styles.navigation}>
           <NavigationButton
+            title="Members"
+            description="View players, characters, and roles"
+            onPress={() =>
+              router.push({
+                pathname: "/campaign/[id]/members",
+
+                params: {
+                  id: campaign.id,
+                },
+              })
+            }
+          />
+
+          <NavigationButton
             title="Ledger"
             description="View campaign transactions"
             onPress={() =>
               router.push({
                 pathname: "/campaign/[id]/ledger",
+
                 params: {
                   id: campaign.id,
                 },
@@ -229,7 +346,9 @@ function formatTransactionType(type: string) {
 
 interface DashboardCardProps {
   title: string;
+
   value: string;
+
   description: string;
 }
 
@@ -247,7 +366,9 @@ function DashboardCard({ title, value, description }: DashboardCardProps) {
 
 interface NavigationButtonProps {
   title: string;
+
   description: string;
+
   onPress?: () => void;
 }
 
@@ -258,7 +379,7 @@ function NavigationButton({
 }: NavigationButtonProps) {
   return (
     <Pressable style={styles.navigationButton} onPress={onPress}>
-      <View>
+      <View style={styles.cardText}>
         <Text style={styles.navigationTitle}>{title}</Text>
 
         <Text style={styles.navigationDescription}>{description}</Text>
@@ -297,6 +418,12 @@ const styles = StyleSheet.create({
     color: "#A99F91",
     fontSize: 16,
     marginTop: 6,
+  },
+
+  modeText: {
+    color: "#81786D",
+    fontSize: 12,
+    marginTop: 5,
   },
 
   sectionTitle: {
@@ -399,6 +526,110 @@ const styles = StyleSheet.create({
     color: "#FFFFFF",
     fontSize: 16,
     fontWeight: "700",
+  },
+
+  rewardCard: {
+    backgroundColor: "#241B12",
+    borderWidth: 1,
+    borderColor: "#8A6930",
+    borderRadius: 14,
+    padding: 18,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: 16,
+  },
+
+  rewardTitle: {
+    color: "#D9A441",
+    fontSize: 18,
+    fontWeight: "700",
+  },
+
+  rewardDescription: {
+    color: "#A99F91",
+    fontSize: 13,
+    marginTop: 5,
+  },
+
+  latestRewardCard: {
+    backgroundColor: "#171612",
+    borderWidth: 1,
+    borderColor: "#3C352D",
+    borderRadius: 12,
+    padding: 16,
+    marginTop: 10,
+  },
+
+  latestRewardLabel: {
+    color: "#81786D",
+    fontSize: 11,
+    fontWeight: "600",
+    textTransform: "uppercase",
+  },
+
+  latestRewardDescription: {
+    color: "#F2E8D5",
+    fontSize: 15,
+    fontWeight: "600",
+    marginTop: 5,
+  },
+
+  latestRewardAmount: {
+    color: "#D9A441",
+    fontSize: 22,
+    fontWeight: "700",
+    marginTop: 7,
+  },
+
+  latestRewardSplit: {
+    color: "#A99F91",
+    fontSize: 12,
+    marginTop: 4,
+  },
+
+  partyFundCard: {
+    backgroundColor: "#1C1916",
+    borderWidth: 1,
+    borderColor: "#594A32",
+    borderRadius: 14,
+    padding: 18,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: 16,
+  },
+
+  cardText: {
+    flex: 1,
+  },
+
+  partyFundTitle: {
+    color: "#F2E8D5",
+    fontSize: 17,
+    fontWeight: "700",
+  },
+
+  partyFundDescription: {
+    color: "#A99F91",
+    fontSize: 13,
+    marginTop: 5,
+  },
+
+  partyFundValueBox: {
+    alignItems: "flex-end",
+  },
+
+  partyFundValue: {
+    color: "#D9A441",
+    fontSize: 24,
+    fontWeight: "700",
+  },
+
+  partyFundBaseLabel: {
+    color: "#81786D",
+    fontSize: 11,
+    marginTop: 3,
   },
 
   grid: {

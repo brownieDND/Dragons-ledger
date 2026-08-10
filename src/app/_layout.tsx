@@ -49,6 +49,20 @@ export default function RootLayout() {
             title: "Campaign",
           }}
         />
+
+        <Stack.Screen
+          name="campaign/[id]/transaction"
+          options={{
+            title: "Transaction",
+          }}
+        />
+
+        <Stack.Screen
+          name="campaign/[id]/ledger"
+          options={{
+            title: "Ledger",
+          }}
+        />
       </Stack>
     </CampaignProvider>
   );

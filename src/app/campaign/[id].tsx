@@ -21,7 +21,7 @@ export default function CampaignDashboardScreen() {
     id: string;
   }>();
 
-  const { getCampaignById } = useCampaigns();
+  const { getCampaignById, getCampaignTransactions } = useCampaigns();
 
   const campaign = getCampaignById(id);
 
@@ -52,6 +52,16 @@ export default function CampaignDashboardScreen() {
     character.wallet,
     campaign.currencySystem,
   );
+
+  const recentTransactions = getCampaignTransactions(campaign.id).slice(0, 5);
+
+  function getCurrencyAbbreviation(currencyId: string) {
+    return (
+      campaign.currencySystem.currencies.find(
+        (currency) => currency.id === currencyId,
+      )?.abbreviation ?? "?"
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container}>
@@ -98,6 +108,20 @@ export default function CampaignDashboardScreen() {
               );
             })}
           </View>
+
+          <Pressable
+            style={styles.transactionButton}
+            onPress={() =>
+              router.push({
+                pathname: "/campaign/[id]/transaction",
+                params: {
+                  id: campaign.id,
+                },
+              })
+            }
+          >
+            <Text style={styles.transactionButtonText}>Record Transaction</Text>
+          </Pressable>
         </View>
 
         <View style={styles.grid}>
@@ -123,11 +147,43 @@ export default function CampaignDashboardScreen() {
         <Text style={styles.sectionTitle}>Recent Activity</Text>
 
         <View style={styles.activityCard}>
-          <Text style={styles.activityEmpty}>No transactions yet.</Text>
+          {recentTransactions.length === 0 ? (
+            <>
+              <Text style={styles.activityEmpty}>No transactions yet.</Text>
 
-          <Text style={styles.activityDescription}>
-            Rewards, purchases, trades, and transfers will appear here.
-          </Text>
+              <Text style={styles.activityDescription}>
+                Rewards, purchases, trades, and transfers will appear here.
+              </Text>
+            </>
+          ) : (
+            recentTransactions.map((transaction) => (
+              <View key={transaction.id} style={styles.transactionRow}>
+                <View style={styles.transactionDetails}>
+                  <Text style={styles.transactionDescription}>
+                    {transaction.description}
+                  </Text>
+
+                  <Text style={styles.transactionType}>
+                    {formatTransactionType(transaction.type)}
+                  </Text>
+                </View>
+
+                <Text
+                  style={[
+                    styles.transactionAmount,
+
+                    transaction.amount > 0
+                      ? styles.positiveAmount
+                      : styles.negativeAmount,
+                  ]}
+                >
+                  {transaction.amount > 0 ? "+" : ""}
+                  {transaction.amount}{" "}
+                  {getCurrencyAbbreviation(transaction.currencyId)}
+                </Text>
+              </View>
+            ))
+          )}
         </View>
 
         <Text style={styles.sectionTitle}>Campaign</Text>
@@ -136,6 +192,14 @@ export default function CampaignDashboardScreen() {
           <NavigationButton
             title="Ledger"
             description="View campaign transactions"
+            onPress={() =>
+              router.push({
+                pathname: "/campaign/[id]/ledger",
+                params: {
+                  id: campaign.id,
+                },
+              })
+            }
           />
 
           <NavigationButton title="Assets" description="View valuable items" />
@@ -145,6 +209,22 @@ export default function CampaignDashboardScreen() {
       </ScrollView>
     </SafeAreaView>
   );
+}
+
+function formatTransactionType(type: string) {
+  switch (type) {
+    case "income":
+      return "Income";
+
+    case "expense":
+      return "Expense";
+
+    case "adjustment":
+      return "Manual Adjustment";
+
+    default:
+      return "Transaction";
+  }
 }
 
 interface DashboardCardProps {
@@ -168,11 +248,16 @@ function DashboardCard({ title, value, description }: DashboardCardProps) {
 interface NavigationButtonProps {
   title: string;
   description: string;
+  onPress?: () => void;
 }
 
-function NavigationButton({ title, description }: NavigationButtonProps) {
+function NavigationButton({
+  title,
+  description,
+  onPress,
+}: NavigationButtonProps) {
   return (
-    <Pressable style={styles.navigationButton}>
+    <Pressable style={styles.navigationButton} onPress={onPress}>
       <View>
         <Text style={styles.navigationTitle}>{title}</Text>
 
@@ -302,6 +387,20 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
 
+  transactionButton: {
+    backgroundColor: "#8B2E2E",
+    borderRadius: 10,
+    paddingVertical: 14,
+    alignItems: "center",
+    marginTop: 18,
+  },
+
+  transactionButtonText: {
+    color: "#FFFFFF",
+    fontSize: 16,
+    fontWeight: "700",
+  },
+
   grid: {
     gap: 12,
     marginTop: 18,
@@ -352,6 +451,45 @@ const styles = StyleSheet.create({
     color: "#A99F91",
     fontSize: 14,
     marginTop: 6,
+  },
+
+  transactionRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: "#302A24",
+  },
+
+  transactionDetails: {
+    flex: 1,
+  },
+
+  transactionDescription: {
+    color: "#F2E8D5",
+    fontSize: 15,
+    fontWeight: "600",
+  },
+
+  transactionType: {
+    color: "#81786D",
+    fontSize: 12,
+    marginTop: 4,
+  },
+
+  transactionAmount: {
+    fontSize: 16,
+    fontWeight: "700",
+  },
+
+  positiveAmount: {
+    color: "#8FB573",
+  },
+
+  negativeAmount: {
+    color: "#C96A6A",
   },
 
   navigation: {

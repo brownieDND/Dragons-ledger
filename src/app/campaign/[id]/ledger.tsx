@@ -1,0 +1,275 @@
+import { router, useLocalSearchParams } from "expo-router";
+
+import {
+    Pressable,
+    SafeAreaView,
+    ScrollView,
+    StyleSheet,
+    Text,
+    View,
+} from "react-native";
+
+import { useCampaigns } from "../../../context/CampaignContext";
+
+export default function LedgerScreen() {
+  const { id } = useLocalSearchParams<{
+    id: string;
+  }>();
+
+  const { getCampaignById, getCampaignTransactions } = useCampaigns();
+
+  const campaign = getCampaignById(id);
+
+  if (!campaign) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.notFound}>
+          <Text style={styles.notFoundTitle}>Campaign not found</Text>
+
+          <Pressable
+            style={styles.primaryButton}
+            onPress={() => router.replace("/")}
+          >
+            <Text style={styles.primaryButtonText}>Return to Campaigns</Text>
+          </Pressable>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  const transactions = getCampaignTransactions(campaign.id);
+
+  function getCurrencyAbbreviation(currencyId: string) {
+    return (
+      campaign.currencySystem.currencies.find(
+        (currency) => currency.id === currencyId,
+      )?.abbreviation ?? "?"
+    );
+  }
+
+  return (
+    <SafeAreaView style={styles.container}>
+      <ScrollView contentContainerStyle={styles.content}>
+        <View style={styles.header}>
+          <Text style={styles.title}>Ledger</Text>
+
+          <Text style={styles.subtitle}>{campaign.name}</Text>
+        </View>
+
+        <Pressable
+          style={styles.primaryButton}
+          onPress={() =>
+            router.push({
+              pathname: "/campaign/[id]/transaction",
+              params: {
+                id: campaign.id,
+              },
+            })
+          }
+        >
+          <Text style={styles.primaryButtonText}>Record Transaction</Text>
+        </Pressable>
+
+        {transactions.length === 0 ? (
+          <View style={styles.emptyCard}>
+            <Text style={styles.emptyTitle}>The ledger is empty.</Text>
+
+            <Text style={styles.emptyDescription}>
+              Transactions involving this campaign will be recorded here.
+            </Text>
+          </View>
+        ) : (
+          <View style={styles.transactionList}>
+            {transactions.map((transaction) => {
+              const abbreviation = getCurrencyAbbreviation(
+                transaction.currencyId,
+              );
+
+              return (
+                <View key={transaction.id} style={styles.transactionCard}>
+                  <View style={styles.transactionHeader}>
+                    <Text style={styles.transactionDescription}>
+                      {transaction.description}
+                    </Text>
+
+                    <Text
+                      style={[
+                        styles.transactionAmount,
+
+                        transaction.amount > 0
+                          ? styles.positiveAmount
+                          : styles.negativeAmount,
+                      ]}
+                    >
+                      {transaction.amount > 0 ? "+" : ""}
+                      {transaction.amount} {abbreviation}
+                    </Text>
+                  </View>
+
+                  <Text style={styles.transactionType}>
+                    {formatTransactionType(transaction.type)}
+                  </Text>
+
+                  <Text style={styles.date}>
+                    {formatDate(transaction.createdAt)}
+                  </Text>
+                </View>
+              );
+            })}
+          </View>
+        )}
+      </ScrollView>
+    </SafeAreaView>
+  );
+}
+
+function formatTransactionType(type: string) {
+  switch (type) {
+    case "income":
+      return "Income";
+
+    case "expense":
+      return "Expense";
+
+    case "adjustment":
+      return "Manual Adjustment";
+
+    default:
+      return "Transaction";
+  }
+}
+
+function formatDate(dateString: string) {
+  const date = new Date(dateString);
+
+  return date.toLocaleString();
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: "#12100E",
+  },
+
+  content: {
+    width: "100%",
+    maxWidth: 750,
+    alignSelf: "center",
+    padding: 24,
+    paddingBottom: 50,
+  },
+
+  header: {
+    marginBottom: 20,
+  },
+
+  title: {
+    color: "#D9A441",
+    fontSize: 30,
+    fontWeight: "700",
+  },
+
+  subtitle: {
+    color: "#A99F91",
+    fontSize: 16,
+    marginTop: 5,
+  },
+
+  primaryButton: {
+    backgroundColor: "#8B2E2E",
+    borderRadius: 12,
+    paddingVertical: 15,
+    alignItems: "center",
+  },
+
+  primaryButtonText: {
+    color: "#FFFFFF",
+    fontSize: 16,
+    fontWeight: "700",
+  },
+
+  emptyCard: {
+    backgroundColor: "#1C1916",
+    borderWidth: 1,
+    borderColor: "#3C352D",
+    borderRadius: 14,
+    padding: 20,
+    marginTop: 20,
+  },
+
+  emptyTitle: {
+    color: "#F2E8D5",
+    fontSize: 17,
+    fontWeight: "600",
+  },
+
+  emptyDescription: {
+    color: "#A99F91",
+    fontSize: 14,
+    marginTop: 6,
+  },
+
+  transactionList: {
+    gap: 12,
+    marginTop: 20,
+  },
+
+  transactionCard: {
+    backgroundColor: "#1C1916",
+    borderWidth: 1,
+    borderColor: "#3C352D",
+    borderRadius: 14,
+    padding: 18,
+  },
+
+  transactionHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    gap: 16,
+  },
+
+  transactionDescription: {
+    color: "#F2E8D5",
+    fontSize: 16,
+    fontWeight: "600",
+    flex: 1,
+  },
+
+  transactionAmount: {
+    fontSize: 17,
+    fontWeight: "700",
+  },
+
+  positiveAmount: {
+    color: "#8FB573",
+  },
+
+  negativeAmount: {
+    color: "#C96A6A",
+  },
+
+  transactionType: {
+    color: "#D9A441",
+    fontSize: 13,
+    marginTop: 10,
+  },
+
+  date: {
+    color: "#81786D",
+    fontSize: 12,
+    marginTop: 5,
+  },
+
+  notFound: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 24,
+  },
+
+  notFoundTitle: {
+    color: "#F2E8D5",
+    fontSize: 24,
+    fontWeight: "700",
+  },
+});

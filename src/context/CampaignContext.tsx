@@ -8,6 +8,8 @@ import {
     DND_5E_CURRENCY_SYSTEM,
 } from "../models/Currency";
 
+import { NewTransaction, Transaction } from "../models/Transaction";
+
 interface NewCampaign {
   name: string;
 
@@ -18,12 +20,24 @@ interface NewCampaign {
   campaignType: CampaignType;
 }
 
+interface TransactionResult {
+  success: boolean;
+  message?: string;
+  transaction?: Transaction;
+}
+
 interface CampaignContextType {
   campaigns: Campaign[];
+
+  transactions: Transaction[];
 
   createCampaign: (campaign: NewCampaign) => Campaign;
 
   getCampaignById: (id: string) => Campaign | undefined;
+
+  createTransaction: (transaction: NewTransaction) => TransactionResult;
+
+  getCampaignTransactions: (campaignId: string) => Transaction[];
 }
 
 const CampaignContext = createContext<CampaignContextType | undefined>(
@@ -32,6 +46,8 @@ const CampaignContext = createContext<CampaignContextType | undefined>(
 
 export function CampaignProvider({ children }: { children: ReactNode }) {
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
+
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
 
   function createCampaign(newCampaign: NewCampaign): Campaign {
     const currencySystem = getDefaultCurrencySystem(newCampaign.gameSystem);
@@ -67,12 +83,148 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     return campaigns.find((campaign) => campaign.id === id);
   }
 
+  function createTransaction(
+    newTransaction: NewTransaction,
+  ): TransactionResult {
+    const campaign = campaigns.find(
+      (item) => item.id === newTransaction.campaignId,
+    );
+
+    if (!campaign) {
+      return {
+        success: false,
+        message: "Campaign not found.",
+      };
+    }
+
+    if (campaign.activeCharacter.id !== newTransaction.characterId) {
+      return {
+        success: false,
+        message: "Character not found.",
+      };
+    }
+
+    const currency = campaign.currencySystem.currencies.find(
+      (item) => item.id === newTransaction.currencyId,
+    );
+
+    if (!currency) {
+      return {
+        success: false,
+        message: "Currency not found.",
+      };
+    }
+
+    const currentBalance = campaign.activeCharacter.wallet.balances.find(
+      (balance) => balance.currencyId === newTransaction.currencyId,
+    );
+
+    if (!currentBalance) {
+      return {
+        success: false,
+        message: "Wallet balance not found.",
+      };
+    }
+
+    let signedAmount = Math.abs(newTransaction.amount);
+
+    if (newTransaction.type === "expense") {
+      signedAmount = -Math.abs(newTransaction.amount);
+    }
+
+    if (newTransaction.type === "adjustment") {
+      signedAmount = newTransaction.amount;
+    }
+
+    const newBalance = currentBalance.amount + signedAmount;
+
+    if (newBalance < 0) {
+      return {
+        success: false,
+        message: `Not enough ${currency.abbreviation}.`,
+      };
+    }
+
+    const transaction: Transaction = {
+      id: createId(),
+
+      campaignId: campaign.id,
+
+      characterId: campaign.activeCharacter.id,
+
+      type: newTransaction.type,
+
+      currencyId: newTransaction.currencyId,
+
+      amount: signedAmount,
+
+      description: newTransaction.description.trim(),
+
+      createdAt: new Date().toISOString(),
+    };
+
+    setCampaigns((currentCampaigns) =>
+      currentCampaigns.map((currentCampaign) => {
+        if (currentCampaign.id !== campaign.id) {
+          return currentCampaign;
+        }
+
+        return {
+          ...currentCampaign,
+
+          activeCharacter: {
+            ...currentCampaign.activeCharacter,
+
+            wallet: {
+              ...currentCampaign.activeCharacter.wallet,
+
+              balances: currentCampaign.activeCharacter.wallet.balances.map(
+                (balance) => {
+                  if (balance.currencyId !== newTransaction.currencyId) {
+                    return balance;
+                  }
+
+                  return {
+                    ...balance,
+                    amount: balance.amount + signedAmount,
+                  };
+                },
+              ),
+            },
+          },
+        };
+      }),
+    );
+
+    setTransactions((currentTransactions) => [
+      transaction,
+      ...currentTransactions,
+    ]);
+
+    return {
+      success: true,
+      transaction,
+    };
+  }
+
+  function getCampaignTransactions(campaignId: string) {
+    return transactions
+      .filter((transaction) => transaction.campaignId === campaignId)
+      .sort(
+        (a, b) =>
+          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+      );
+  }
+
   return (
     <CampaignContext.Provider
       value={{
         campaigns,
+        transactions,
         createCampaign,
         getCampaignById,
+        createTransaction,
+        getCampaignTransactions,
       }}
     >
       {children}
@@ -100,20 +252,9 @@ function getDefaultCurrencySystem(gameSystem: GameSystem): CurrencySystem {
       return DND_5E_CURRENCY_SYSTEM;
 
     case "pathfinder-2e":
-      /*
-       * Temporary fallback.
-       *
-       * Pathfinder will receive its own
-       * currency preset once we implement
-       * additional systems.
-       */
       return DND_5E_CURRENCY_SYSTEM;
 
     case "custom":
-      /*
-       * Custom currency creation will be
-       * implemented as its own setup flow.
-       */
       return DND_5E_CURRENCY_SYSTEM;
 
     default:

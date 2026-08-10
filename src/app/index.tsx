@@ -34,21 +34,34 @@ export default function CampaignsScreen() {
         ) : (
           <View style={styles.campaignList}>
             {campaigns.map((campaign) => (
-              <View key={campaign.id} style={styles.campaignCard}>
-                <Text style={styles.campaignName}>{campaign.name}</Text>
+              <Link
+                key={campaign.id}
+                href={{
+                  pathname: "/campaign/[id]",
+                  params: {
+                    id: campaign.id,
+                  },
+                }}
+                asChild
+              >
+                <Pressable style={styles.campaignCard}>
+                  <Text style={styles.campaignName}>{campaign.name}</Text>
 
-                <Text style={styles.characterName}>
-                  {campaign.characterName}
-                </Text>
+                  <Text style={styles.characterName}>
+                    {campaign.activeCharacter.name}
+                  </Text>
 
-                <Text style={styles.campaignInfo}>
-                  {formatGameSystem(campaign.gameSystem)}
-                  {" • "}
-                  {campaign.campaignType === "solo"
-                    ? "Personal"
-                    : "Multiplayer"}
-                </Text>
-              </View>
+                  <Text style={styles.campaignInfo}>
+                    {formatGameSystem(campaign.gameSystem)}
+                    {" • "}
+                    {campaign.campaignType === "solo"
+                      ? "Personal"
+                      : "Multiplayer"}
+                  </Text>
+
+                  <Text style={styles.openCampaign}>Open Campaign →</Text>
+                </Pressable>
+              </Link>
             ))}
           </View>
         )}
@@ -166,6 +179,13 @@ const styles = StyleSheet.create({
     color: "#A99F91",
     fontSize: 14,
     marginTop: 8,
+  },
+
+  openCampaign: {
+    color: "#D9A441",
+    fontSize: 14,
+    fontWeight: "600",
+    marginTop: 14,
   },
 
   actions: {

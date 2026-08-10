@@ -42,6 +42,13 @@ export default function RootLayout() {
             title: "Join Campaign",
           }}
         />
+
+        <Stack.Screen
+          name="campaign/[id]"
+          options={{
+            title: "Campaign",
+          }}
+        />
       </Stack>
     </CampaignProvider>
   );

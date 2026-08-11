@@ -1,18 +1,20 @@
 import { router, useLocalSearchParams } from "expo-router";
 
-import {
-    Pressable,
-    SafeAreaView,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    View,
-} from "react-native";
-
 import { useState } from "react";
 
+import {
+  Pressable,
+  SafeAreaView,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from "react-native";
+
 import { useCampaigns } from "../../../context/CampaignContext";
+
+import { getWalletBalance } from "../../../models/Currency";
 
 import { TransactionType } from "../../../models/Transaction";
 
@@ -21,7 +23,8 @@ export default function TransactionScreen() {
     id: string;
   }>();
 
-  const { getCampaignById, createTransaction } = useCampaigns();
+  const { getCampaignById, getActiveCampaignMember, createTransaction } =
+    useCampaigns();
 
   const campaign = getCampaignById(id);
 
@@ -53,14 +56,48 @@ export default function TransactionScreen() {
     );
   }
 
+  const activeMember = getActiveCampaignMember(campaign.id);
+
+  const character = activeMember?.character;
+
+  if (!activeMember) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.notFound}>
+          <Text style={styles.notFoundTitle}>Active member not found</Text>
+
+          <Pressable style={styles.primaryButton} onPress={() => router.back()}>
+            <Text style={styles.primaryButtonText}>Return to Campaign</Text>
+          </Pressable>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  if (!character) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.notFound}>
+          <Text style={styles.notFoundTitle}>No Character Wallet</Text>
+
+          <Text style={styles.notFoundText}>
+            {activeMember.displayName} does not have a character attached to
+            this campaign.
+          </Text>
+
+          <Pressable style={styles.primaryButton} onPress={() => router.back()}>
+            <Text style={styles.primaryButtonText}>Return to Campaign</Text>
+          </Pressable>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   const selectedCurrency = campaign.currencySystem.currencies.find(
     (currency) => currency.id === currencyId,
   );
 
-  const currentBalance =
-    campaign.activeCharacter.wallet.balances.find(
-      (balance) => balance.currencyId === currencyId,
-    )?.amount ?? 0;
+  const currentBalance = getWalletBalance(character.wallet, currencyId);
 
   function clearError() {
     if (errorMessage) {
@@ -75,16 +112,6 @@ export default function TransactionScreen() {
 
   function handleCurrencyChange(newCurrencyId: string) {
     setCurrencyId(newCurrencyId);
-    clearError();
-  }
-
-  function handleAmountChange(value: string) {
-    setAmount(value);
-    clearError();
-  }
-
-  function handleDescriptionChange(value: string) {
-    setDescription(value);
     clearError();
   }
 
@@ -122,7 +149,7 @@ export default function TransactionScreen() {
       const abbreviation = selectedCurrency?.abbreviation ?? "";
 
       setErrorMessage(
-        `Insufficient funds. You only have ${currentBalance} ${abbreviation} available, but this expense requires ${Math.abs(
+        `Insufficient funds. ${character.name} only has ${currentBalance} ${abbreviation} available, but this expense requires ${Math.abs(
           numericAmount,
         )} ${abbreviation}.`,
       );
@@ -138,7 +165,7 @@ export default function TransactionScreen() {
       const abbreviation = selectedCurrency?.abbreviation ?? "";
 
       setErrorMessage(
-        `This adjustment would reduce the balance below zero. You currently have ${currentBalance} ${abbreviation}.`,
+        `This adjustment would reduce the balance below zero. ${character.name} currently has ${currentBalance} ${abbreviation}.`,
       );
 
       return;
@@ -152,15 +179,10 @@ export default function TransactionScreen() {
 
     const result = createTransaction({
       campaignId: campaign.id,
-
-      characterId: campaign.activeCharacter.id,
-
+      characterId: character.id,
       type: transactionType,
-
       currencyId,
-
       amount: transactionAmount,
-
       description: description.trim(),
     });
 
@@ -183,7 +205,9 @@ export default function TransactionScreen() {
       >
         <Text style={styles.heading}>New Transaction</Text>
 
-        <Text style={styles.character}>{campaign.activeCharacter.name}</Text>
+        <Text style={styles.member}>{activeMember.displayName}</Text>
+
+        <Text style={styles.character}>{character.name}</Text>
 
         <Text style={styles.sectionTitle}>Transaction Type</Text>
 
@@ -235,7 +259,10 @@ export default function TransactionScreen() {
 
         <TextInput
           value={amount}
-          onChangeText={handleAmountChange}
+          onChangeText={(value) => {
+            setAmount(value);
+            clearError();
+          }}
           placeholder={
             transactionType === "adjustment"
               ? "Example: 50 or -50"
@@ -246,18 +273,21 @@ export default function TransactionScreen() {
           style={styles.input}
         />
 
-        {transactionType === "adjustment" && (
+        {transactionType === "adjustment" ? (
           <Text style={styles.helperText}>
             Use a positive number to add currency or a negative number to remove
             it.
           </Text>
-        )}
+        ) : null}
 
         <Text style={styles.label}>Description</Text>
 
         <TextInput
           value={description}
-          onChangeText={handleDescriptionChange}
+          onChangeText={(value) => {
+            setDescription(value);
+            clearError();
+          }}
           placeholder="Example: Bought healing potions"
           placeholderTextColor="#746D63"
           style={[styles.input, styles.descriptionInput]}
@@ -319,10 +349,16 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
 
-  character: {
-    color: "#A99F91",
+  member: {
+    color: "#F2E8D5",
     fontSize: 16,
     marginTop: 5,
+  },
+
+  character: {
+    color: "#A99F91",
+    fontSize: 14,
+    marginTop: 3,
     marginBottom: 10,
   },
 
@@ -444,6 +480,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#8B2E2E",
     borderRadius: 12,
     paddingVertical: 16,
+    paddingHorizontal: 18,
     alignItems: "center",
     marginTop: 24,
   },
@@ -465,5 +502,15 @@ const styles = StyleSheet.create({
     color: "#F2E8D5",
     fontSize: 24,
     fontWeight: "700",
+    textAlign: "center",
+  },
+
+  notFoundText: {
+    color: "#A99F91",
+    fontSize: 14,
+    lineHeight: 20,
+    textAlign: "center",
+    marginTop: 10,
+    maxWidth: 400,
   },
 });

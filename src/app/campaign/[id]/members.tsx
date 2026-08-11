@@ -3,14 +3,14 @@ import { router, useLocalSearchParams } from "expo-router";
 import { useState } from "react";
 
 import {
-    Alert,
-    Pressable,
-    SafeAreaView,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    View,
+  Alert,
+  Pressable,
+  SafeAreaView,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
 } from "react-native";
 
 import { useCampaigns } from "../../../context/CampaignContext";
@@ -24,7 +24,8 @@ export default function CampaignMembersScreen() {
     id: string;
   }>();
 
-  const { getCampaignById, addCampaignMember } = useCampaigns();
+  const { getCampaignById, addCampaignMember, setActiveMember } =
+    useCampaigns();
 
   const campaign = getCampaignById(id);
 
@@ -51,14 +52,15 @@ export default function CampaignMembersScreen() {
     );
   }
 
+  const activeMember = campaign.members.find(
+    (member) => member.id === campaign.activeMemberId,
+  );
+
   function handleAddMember() {
     const result = addCampaignMember({
       campaignId: campaign.id,
-
       displayName,
-
       characterName,
-
       role,
     });
 
@@ -72,14 +74,30 @@ export default function CampaignMembersScreen() {
     }
 
     setDisplayName("");
-
     setCharacterName("");
-
     setRole("player");
 
     Alert.alert(
       "Member Added",
       `${result.member?.displayName} joined the campaign.`,
+    );
+  }
+
+  function handleSwitchMember(memberId: string) {
+    const result = setActiveMember(campaign.id, memberId);
+
+    if (!result.success) {
+      Alert.alert(
+        "Unable to Switch Member",
+        result.message ?? "The active member could not be changed.",
+      );
+
+      return;
+    }
+
+    Alert.alert(
+      "Active Member Changed",
+      `You are now testing the campaign as ${result.member?.displayName}.`,
     );
   }
 
@@ -100,8 +118,31 @@ export default function CampaignMembersScreen() {
           {campaign.members.length === 1 ? "member" : "members"}
         </Text>
 
+        <View style={styles.activeMemberCard}>
+          <Text style={styles.activeMemberLabel}>Current Test Member</Text>
+
+          <Text style={styles.activeMemberName}>
+            {activeMember?.displayName ?? "Unknown"}
+          </Text>
+
+          <Text style={styles.activeMemberDescription}>
+            {activeMember ? formatRole(activeMember.role) : "No active role"}
+            {activeMember?.character
+              ? ` • ${activeMember.character.name}`
+              : " • No character"}
+          </Text>
+
+          <Text style={styles.developmentText}>
+            This selector is temporary development functionality. Later, the
+            signed-in account and campaign membership will determine who is
+            using the app.
+          </Text>
+        </View>
+
         <View style={styles.memberList}>
           {campaign.members.map((member) => {
+            const isActive = member.id === campaign.activeMemberId;
+
             const characterTotal = member.character
               ? getWalletTotalBaseValue(
                   member.character.wallet,
@@ -110,7 +151,13 @@ export default function CampaignMembersScreen() {
               : null;
 
             return (
-              <View key={member.id} style={styles.memberCard}>
+              <View
+                key={member.id}
+                style={[
+                  styles.memberCard,
+                  isActive && styles.activeMemberBorder,
+                ]}
+              >
                 <View style={styles.memberHeader}>
                   <View style={styles.memberInfo}>
                     <Text style={styles.memberName}>{member.displayName}</Text>
@@ -134,12 +181,31 @@ export default function CampaignMembersScreen() {
                 </View>
 
                 <View style={styles.badges}>
+                  {isActive ? <RoleBadge label="Active" highlighted /> : null}
+
                   {member.isOwner ? (
                     <RoleBadge label="Owner" highlighted />
                   ) : null}
 
                   <RoleBadge label={formatRole(member.role)} />
                 </View>
+
+                {!isActive ? (
+                  <Pressable
+                    style={styles.switchButton}
+                    onPress={() => handleSwitchMember(member.id)}
+                  >
+                    <Text style={styles.switchButtonText}>
+                      Test as This Member
+                    </Text>
+                  </Pressable>
+                ) : (
+                  <View style={styles.currentMemberBox}>
+                    <Text style={styles.currentMemberText}>
+                      Currently active on this device
+                    </Text>
+                  </View>
+                )}
               </View>
             );
           })}
@@ -151,7 +217,7 @@ export default function CampaignMembersScreen() {
 
             <Text style={styles.helperText}>
               This is temporary development functionality. Real multiplayer
-              joining will replace it later.
+              invitations, accounts, and joining will replace it later.
             </Text>
 
             <Text style={styles.label}>Player Name</Text>
@@ -309,7 +375,43 @@ const styles = StyleSheet.create({
     color: "#A99F91",
     fontSize: 14,
     marginTop: 5,
-    marginBottom: 22,
+    marginBottom: 18,
+  },
+
+  activeMemberCard: {
+    backgroundColor: "#241B12",
+    borderWidth: 1,
+    borderColor: "#8A6930",
+    borderRadius: 14,
+    padding: 18,
+    marginBottom: 20,
+  },
+
+  activeMemberLabel: {
+    color: "#81786D",
+    fontSize: 11,
+    fontWeight: "700",
+    textTransform: "uppercase",
+  },
+
+  activeMemberName: {
+    color: "#D9A441",
+    fontSize: 20,
+    fontWeight: "700",
+    marginTop: 5,
+  },
+
+  activeMemberDescription: {
+    color: "#F2E8D5",
+    fontSize: 14,
+    marginTop: 4,
+  },
+
+  developmentText: {
+    color: "#A99F91",
+    fontSize: 12,
+    lineHeight: 18,
+    marginTop: 10,
   },
 
   memberList: {
@@ -322,6 +424,10 @@ const styles = StyleSheet.create({
     borderColor: "#3C352D",
     borderRadius: 14,
     padding: 18,
+  },
+
+  activeMemberBorder: {
+    borderColor: "#D9A441",
   },
 
   memberHeader: {
@@ -399,6 +505,35 @@ const styles = StyleSheet.create({
 
   highlightedBadgeText: {
     color: "#D9A441",
+  },
+
+  switchButton: {
+    borderWidth: 1,
+    borderColor: "#D9A441",
+    borderRadius: 9,
+    paddingVertical: 10,
+    alignItems: "center",
+    marginTop: 15,
+  },
+
+  switchButtonText: {
+    color: "#D9A441",
+    fontSize: 13,
+    fontWeight: "700",
+  },
+
+  currentMemberBox: {
+    backgroundColor: "#2A2115",
+    borderRadius: 9,
+    paddingVertical: 10,
+    alignItems: "center",
+    marginTop: 15,
+  },
+
+  currentMemberText: {
+    color: "#D9A441",
+    fontSize: 12,
+    fontWeight: "600",
   },
 
   sectionTitle: {

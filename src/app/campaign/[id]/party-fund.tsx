@@ -1,22 +1,22 @@
 import { router, useLocalSearchParams } from "expo-router";
 
-import {
-    Pressable,
-    SafeAreaView,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    View,
-} from "react-native";
-
 import { useState } from "react";
+
+import {
+  Pressable,
+  SafeAreaView,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from "react-native";
 
 import { useCampaigns } from "../../../context/CampaignContext";
 
 import {
-    getWalletBalance,
-    getWalletTotalBaseValue,
+  getWalletBalance,
+  getWalletTotalBaseValue,
 } from "../../../models/Currency";
 
 type PartyFundAction = "contribute" | "withdraw";
@@ -26,8 +26,12 @@ export default function PartyFundScreen() {
     id: string;
   }>();
 
-  const { getCampaignById, contributeToPartyFund, createPartyFundTransaction } =
-    useCampaigns();
+  const {
+    getCampaignById,
+    getActiveCampaignMember,
+    contributeToPartyFund,
+    createPartyFundTransaction,
+  } = useCampaigns();
 
   const campaign = getCampaignById(id);
 
@@ -60,6 +64,15 @@ export default function PartyFundScreen() {
     );
   }
 
+  const activeMember = getActiveCampaignMember(campaign.id);
+
+  const activeCharacter = activeMember?.character;
+
+  const canManagePartyFund =
+    campaign.campaignType === "solo" ||
+    activeMember?.role === "party-leader" ||
+    activeMember?.role === "treasurer";
+
   const currencies = [...campaign.currencySystem.currencies].sort(
     (a, b) => b.displayOrder - a.displayOrder,
   );
@@ -73,10 +86,9 @@ export default function PartyFundScreen() {
     currencyId,
   );
 
-  const characterBalance = getWalletBalance(
-    campaign.activeCharacter.wallet,
-    currencyId,
-  );
+  const characterBalance = activeCharacter
+    ? getWalletBalance(activeCharacter.wallet, currencyId)
+    : 0;
 
   const totalBaseValue = getWalletTotalBaseValue(
     campaign.partyFund.wallet,
@@ -95,7 +107,6 @@ export default function PartyFundScreen() {
 
   function handleCurrencyChange(newCurrencyId: string) {
     setCurrencyId(newCurrencyId);
-
     clearMessages();
   }
 
@@ -121,9 +132,17 @@ export default function PartyFundScreen() {
     const abbreviation = selectedCurrency?.abbreviation ?? "";
 
     if (action === "contribute") {
+      if (!activeCharacter) {
+        setErrorMessage(
+          `${activeMember?.displayName ?? "This member"} does not have a character wallet to contribute from.`,
+        );
+
+        return;
+      }
+
       if (numericAmount > characterBalance) {
         setErrorMessage(
-          `Insufficient funds. ${campaign.activeCharacter.name} only has ${characterBalance} ${abbreviation}, but this contribution requires ${numericAmount} ${abbreviation}.`,
+          `Insufficient funds. ${activeCharacter.name} only has ${characterBalance} ${abbreviation}, but this contribution requires ${numericAmount} ${abbreviation}.`,
         );
 
         return;
@@ -145,9 +164,17 @@ export default function PartyFundScreen() {
       }
 
       setSuccessMessage(
-        `${numericAmount} ${abbreviation} was transferred from ${campaign.activeCharacter.name} to the Party Fund.`,
+        `${numericAmount} ${abbreviation} was transferred from ${activeCharacter.name} to the Party Fund.`,
       );
     } else {
+      if (!canManagePartyFund) {
+        setErrorMessage(
+          "Only the Party Leader or Treasurer can withdraw directly from the Party Fund.",
+        );
+
+        return;
+      }
+
       if (numericAmount > partyFundBalance) {
         setErrorMessage(
           `Insufficient Party Fund balance. The fund currently has ${partyFundBalance} ${abbreviation}, but this withdrawal requires ${numericAmount} ${abbreviation}.`,
@@ -158,13 +185,9 @@ export default function PartyFundScreen() {
 
       const result = createPartyFundTransaction({
         campaignId: campaign.id,
-
         type: "expense",
-
         currencyId,
-
         amount: numericAmount,
-
         description: description.trim(),
       });
 
@@ -197,9 +220,11 @@ export default function PartyFundScreen() {
           <Text style={styles.subtitle}>{campaign.name}</Text>
 
           <Text style={styles.modeLabel}>
-            {campaign.campaignType === "solo"
-              ? "Personal / Solo Campaign"
-              : "Multiplayer Campaign"}
+            Active as {activeMember?.displayName ?? "Unknown Member"}
+          </Text>
+
+          <Text style={styles.roleLabel}>
+            {activeMember ? formatRole(activeMember.role) : "No active role"}
           </Text>
         </View>
 
@@ -224,7 +249,6 @@ export default function PartyFundScreen() {
             {currencies.map((currency) => {
               const balance = getWalletBalance(
                 campaign.partyFund.wallet,
-
                 currency.id,
               );
 
@@ -259,6 +283,17 @@ export default function PartyFundScreen() {
           />
         </View>
 
+        {action === "withdraw" && !canManagePartyFund ? (
+          <View style={styles.permissionCard}>
+            <Text style={styles.permissionTitle}>Restricted Action</Text>
+
+            <Text style={styles.permissionText}>
+              Direct Party Fund spending is limited to the Party Leader and
+              Treasurer.
+            </Text>
+          </View>
+        ) : null}
+
         <Text style={styles.sectionTitle}>Currency</Text>
 
         <View style={styles.currencySelector}>
@@ -274,11 +309,23 @@ export default function PartyFundScreen() {
 
         {action === "contribute" ? (
           <View style={styles.balanceCard}>
-            <Text style={styles.balanceLabel}>Your Available Balance</Text>
+            <Text style={styles.balanceLabel}>Character Balance</Text>
 
-            <Text style={styles.balanceAmount}>
-              {characterBalance} {selectedCurrency?.abbreviation ?? ""}
-            </Text>
+            {activeCharacter ? (
+              <>
+                <Text style={styles.balanceCharacter}>
+                  {activeCharacter.name}
+                </Text>
+
+                <Text style={styles.balanceAmount}>
+                  {characterBalance} {selectedCurrency?.abbreviation ?? ""}
+                </Text>
+              </>
+            ) : (
+              <Text style={styles.noCharacterText}>
+                No character wallet available.
+              </Text>
+            )}
           </View>
         ) : (
           <View style={styles.balanceCard}>
@@ -310,7 +357,6 @@ export default function PartyFundScreen() {
           value={description}
           onChangeText={(value) => {
             setDescription(value);
-
             clearMessages();
           }}
           placeholder={
@@ -347,30 +393,34 @@ export default function PartyFundScreen() {
           </Text>
         </Pressable>
 
-        {campaign.campaignType === "solo" ? (
-          <View style={styles.infoCard}>
-            <Text style={styles.infoTitle}>Solo Campaign</Text>
+        <View style={styles.infoCard}>
+          <Text style={styles.infoTitle}>Party Fund Permissions</Text>
 
-            <Text style={styles.infoText}>
-              Solo campaigns have full Party Fund control. A contribution still
-              moves existing money from your character wallet into the Party
-              Fund rather than creating new currency.
-            </Text>
-          </View>
-        ) : (
-          <View style={styles.infoCard}>
-            <Text style={styles.infoTitle}>Multiplayer Campaign</Text>
-
-            <Text style={styles.infoText}>
-              Every player will be able to contribute currency they actually
-              own. Direct Party Fund spending will later be restricted to the
-              Party Leader and Treasurer.
-            </Text>
-          </View>
-        )}
+          <Text style={styles.infoText}>
+            Any member with a character can contribute currency they own. Direct
+            Party Fund withdrawals are restricted to the Party Leader and
+            Treasurer in multiplayer campaigns.
+          </Text>
+        </View>
       </ScrollView>
     </SafeAreaView>
   );
+}
+
+function formatRole(role: string) {
+  switch (role) {
+    case "dm":
+      return "Dungeon Master";
+
+    case "party-leader":
+      return "Party Leader";
+
+    case "treasurer":
+      return "Treasurer";
+
+    default:
+      return "Player";
+  }
 }
 
 interface OptionButtonProps {
@@ -423,10 +473,16 @@ const styles = StyleSheet.create({
   },
 
   modeLabel: {
-    color: "#D9A441",
-    fontSize: 12,
+    color: "#F2E8D5",
+    fontSize: 13,
     fontWeight: "600",
-    marginTop: 7,
+    marginTop: 8,
+  },
+
+  roleLabel: {
+    color: "#81786D",
+    fontSize: 12,
+    marginTop: 3,
   },
 
   walletCard: {
@@ -552,6 +608,28 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
 
+  permissionCard: {
+    backgroundColor: "#2B1717",
+    borderWidth: 1,
+    borderColor: "#8B2E2E",
+    borderRadius: 10,
+    padding: 14,
+    marginTop: 14,
+  },
+
+  permissionTitle: {
+    color: "#E08A8A",
+    fontSize: 14,
+    fontWeight: "700",
+  },
+
+  permissionText: {
+    color: "#D8B5B5",
+    fontSize: 13,
+    lineHeight: 19,
+    marginTop: 4,
+  },
+
   balanceCard: {
     backgroundColor: "#151310",
     borderWidth: 1,
@@ -566,11 +644,24 @@ const styles = StyleSheet.create({
     fontSize: 12,
   },
 
+  balanceCharacter: {
+    color: "#F2E8D5",
+    fontSize: 14,
+    fontWeight: "600",
+    marginTop: 4,
+  },
+
   balanceAmount: {
     color: "#D9A441",
     fontSize: 20,
     fontWeight: "700",
     marginTop: 3,
+  },
+
+  noCharacterText: {
+    color: "#C96A6A",
+    fontSize: 14,
+    marginTop: 6,
   },
 
   label: {
@@ -644,6 +735,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#8B2E2E",
     borderRadius: 12,
     paddingVertical: 16,
+    paddingHorizontal: 18,
     alignItems: "center",
     marginTop: 24,
   },

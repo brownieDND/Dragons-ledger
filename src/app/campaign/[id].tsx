@@ -11,18 +11,28 @@ import {
 
 import { useCampaigns } from "../../context/CampaignContext";
 
-import {
-  getWalletBalance,
-  getWalletTotalBaseValue,
-} from "../../models/Currency";
+import { getWalletTotalBaseValue } from "../../models/Currency";
+
+import { CampaignMemberRole } from "../../models/Campaign";
 
 export default function CampaignDashboardScreen() {
   const { id } = useLocalSearchParams<{
     id: string;
   }>();
 
-  const { getCampaignById, getCampaignTransactions, getCampaignRewards } =
-    useCampaigns();
+  const {
+    getCampaignById,
+
+    getActiveCampaignMember,
+
+    getCampaignTransactions,
+
+    getCampaignRewards,
+
+    getActiveSession,
+
+    getCampaignQuests,
+  } = useCampaigns();
 
   const campaign = getCampaignById(id);
 
@@ -43,16 +53,25 @@ export default function CampaignDashboardScreen() {
     );
   }
 
-  const character = campaign.activeCharacter;
+  const activeMember = getActiveCampaignMember(campaign.id);
+
+  const character = activeMember?.character;
+
+  const activeSession = getActiveSession(campaign.id);
+
+  const campaignQuests = getCampaignQuests(campaign.id);
+
+  const activeQuests = campaignQuests.filter(
+    (quest) => quest.status === "active",
+  );
 
   const currencies = [...campaign.currencySystem.currencies].sort(
     (a, b) => b.displayOrder - a.displayOrder,
   );
 
-  const characterTotal = getWalletTotalBaseValue(
-    character.wallet,
-    campaign.currencySystem,
-  );
+  const characterTotal = character
+    ? getWalletTotalBaseValue(character.wallet, campaign.currencySystem)
+    : null;
 
   const partyFundTotal = getWalletTotalBaseValue(
     campaign.partyFund.wallet,
@@ -73,13 +92,33 @@ export default function CampaignDashboardScreen() {
     );
   }
 
+  function getTransactionAccountLabel(characterId?: string) {
+    if (!characterId) {
+      return "Character";
+    }
+
+    const member = campaign.members.find(
+      (campaignMember) => campaignMember.character?.id === characterId,
+    );
+
+    return member?.character?.name ?? member?.displayName ?? "Character";
+  }
+
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView contentContainerStyle={styles.content}>
         <View style={styles.header}>
           <Text style={styles.campaignName}>{campaign.name}</Text>
 
-          <Text style={styles.characterName}>Playing as {character.name}</Text>
+          <Text style={styles.memberName}>
+            Active as {activeMember?.displayName ?? "Unknown Member"}
+          </Text>
+
+          <Text style={styles.roleText}>
+            {activeMember ? formatRole(activeMember.role) : "No active role"}
+
+            {character ? ` • ${character.name}` : " • No character"}
+          </Text>
 
           <Text style={styles.modeText}>
             {campaign.campaignType === "solo"
@@ -88,58 +127,122 @@ export default function CampaignDashboardScreen() {
           </Text>
         </View>
 
+        <Text style={styles.sectionTitle}>Session</Text>
+
+        <Pressable
+          style={[
+            styles.sessionCard,
+
+            activeSession ? styles.sessionCardActive : null,
+          ]}
+          onPress={() =>
+            router.push({
+              pathname: "/campaign/[id]/session",
+
+              params: {
+                id: campaign.id,
+              },
+            })
+          }
+        >
+          <View style={styles.cardText}>
+            <Text
+              style={
+                activeSession
+                  ? styles.sessionActiveTitle
+                  : styles.sessionInactiveTitle
+              }
+            >
+              {activeSession ? "Session Active" : "No Active Session"}
+            </Text>
+
+            <Text style={styles.sessionDescription}>
+              {activeSession
+                ? `${activeQuests.length} active ${
+                    activeQuests.length === 1 ? "quest" : "quests"
+                  }`
+                : "Start or view campaign sessions and quests"}
+            </Text>
+          </View>
+
+          <Text style={styles.navigationArrow}>→</Text>
+        </Pressable>
+
         <Text style={styles.sectionTitle}>Character Wallet</Text>
 
-        <View style={styles.walletCard}>
-          <View style={styles.walletHeader}>
-            <View>
-              <Text style={styles.walletCharacter}>{character.name}</Text>
+        {character ? (
+          <View style={styles.walletCard}>
+            <View style={styles.walletHeader}>
+              <View>
+                <Text style={styles.walletCharacter}>{character.name}</Text>
 
-              <Text style={styles.walletSystem}>
-                {campaign.currencySystem.name}
+                <Text style={styles.walletSystem}>
+                  {campaign.currencySystem.name}
+                </Text>
+              </View>
+
+              <View style={styles.wealthBox}>
+                <Text style={styles.wealthLabel}>Base Value</Text>
+
+                <Text style={styles.wealthValue}>{characterTotal}</Text>
+              </View>
+            </View>
+
+            <View style={styles.currencyGrid}>
+              {currencies.map((currency) => {
+                const balance =
+                  character.wallet.balances.find(
+                    (walletBalance) => walletBalance.currencyId === currency.id,
+                  )?.amount ?? 0;
+
+                return (
+                  <View key={currency.id} style={styles.currencyItem}>
+                    <Text style={styles.currencyAmount}>{balance}</Text>
+
+                    <Text style={styles.currencyAbbreviation}>
+                      {currency.abbreviation}
+                    </Text>
+
+                    <Text style={styles.currencyName}>{currency.name}</Text>
+                  </View>
+                );
+              })}
+            </View>
+
+            <Pressable
+              style={styles.transactionButton}
+              onPress={() =>
+                router.push({
+                  pathname: "/campaign/[id]/transaction",
+
+                  params: {
+                    id: campaign.id,
+                  },
+                })
+              }
+            >
+              <Text style={styles.transactionButtonText}>
+                Record Transaction
               </Text>
-            </View>
-
-            <View style={styles.wealthBox}>
-              <Text style={styles.wealthLabel}>Base Value</Text>
-
-              <Text style={styles.wealthValue}>{characterTotal}</Text>
-            </View>
+            </Pressable>
           </View>
+        ) : (
+          <View style={styles.noCharacterCard}>
+            <Text style={styles.noCharacterTitle}>No Character Wallet</Text>
 
-          <View style={styles.currencyGrid}>
-            {currencies.map((currency) => {
-              const balance = getWalletBalance(character.wallet, currency.id);
+            <Text style={styles.noCharacterDescription}>
+              {activeMember?.displayName ?? "This member"} does not currently
+              have a character attached to this campaign.
+            </Text>
 
-              return (
-                <View key={currency.id} style={styles.currencyItem}>
-                  <Text style={styles.currencyAmount}>{balance}</Text>
-
-                  <Text style={styles.currencyAbbreviation}>
-                    {currency.abbreviation}
-                  </Text>
-
-                  <Text style={styles.currencyName}>{currency.name}</Text>
-                </View>
-              );
-            })}
+            {activeMember?.role === "dm" ? (
+              <Text style={styles.noCharacterHint}>
+                Dungeon Masters do not need a character to manage campaign
+                features.
+              </Text>
+            ) : null}
           </View>
-
-          <Pressable
-            style={styles.transactionButton}
-            onPress={() =>
-              router.push({
-                pathname: "/campaign/[id]/transaction",
-
-                params: {
-                  id: campaign.id,
-                },
-              })
-            }
-          >
-            <Text style={styles.transactionButtonText}>Record Transaction</Text>
-          </Pressable>
-        </View>
+        )}
 
         <Text style={styles.sectionTitle}>Rewards</Text>
 
@@ -231,9 +334,11 @@ export default function CampaignDashboardScreen() {
           />
 
           <DashboardCard
-            title="Active Quest"
-            value="None"
-            description="No active quest"
+            title="Active Quests"
+            value={`${activeQuests.length}`}
+            description={
+              activeSession ? "Current campaign quests" : "No session active"
+            }
           />
 
           <DashboardCard
@@ -266,7 +371,9 @@ export default function CampaignDashboardScreen() {
                   <Text style={styles.transactionType}>
                     {transaction.accountType === "party-fund"
                       ? "Party Fund"
-                      : formatTransactionType(transaction.type)}
+                      : getTransactionAccountLabel(transaction.characterId)}
+                    {" • "}
+                    {formatTransactionType(transaction.type)}
                   </Text>
                 </View>
 
@@ -291,6 +398,20 @@ export default function CampaignDashboardScreen() {
         <Text style={styles.sectionTitle}>Campaign</Text>
 
         <View style={styles.navigation}>
+          <NavigationButton
+            title="Session & Quests"
+            description="Manage sessions and campaign quests"
+            onPress={() =>
+              router.push({
+                pathname: "/campaign/[id]/session",
+
+                params: {
+                  id: campaign.id,
+                },
+              })
+            }
+          />
+
           <NavigationButton
             title="Members"
             description="View players, characters, and roles"
@@ -328,6 +449,22 @@ export default function CampaignDashboardScreen() {
   );
 }
 
+function formatRole(role: CampaignMemberRole) {
+  switch (role) {
+    case "dm":
+      return "Dungeon Master";
+
+    case "party-leader":
+      return "Party Leader";
+
+    case "treasurer":
+      return "Treasurer";
+
+    default:
+      return "Player";
+  }
+}
+
 function formatTransactionType(type: string) {
   switch (type) {
     case "income":
@@ -346,9 +483,7 @@ function formatTransactionType(type: string) {
 
 interface DashboardCardProps {
   title: string;
-
   value: string;
-
   description: string;
 }
 
@@ -366,9 +501,7 @@ function DashboardCard({ title, value, description }: DashboardCardProps) {
 
 interface NavigationButtonProps {
   title: string;
-
   description: string;
-
   onPress?: () => void;
 }
 
@@ -414,10 +547,16 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
 
-  characterName: {
-    color: "#A99F91",
+  memberName: {
+    color: "#F2E8D5",
     fontSize: 16,
     marginTop: 6,
+  },
+
+  roleText: {
+    color: "#A99F91",
+    fontSize: 13,
+    marginTop: 4,
   },
 
   modeText: {
@@ -432,6 +571,41 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     marginTop: 28,
     marginBottom: 12,
+  },
+
+  sessionCard: {
+    backgroundColor: "#1C1916",
+    borderWidth: 1,
+    borderColor: "#3C352D",
+    borderRadius: 14,
+    padding: 18,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 14,
+  },
+
+  sessionCardActive: {
+    backgroundColor: "#1B2118",
+    borderColor: "#54734A",
+  },
+
+  sessionActiveTitle: {
+    color: "#8FB573",
+    fontSize: 18,
+    fontWeight: "700",
+  },
+
+  sessionInactiveTitle: {
+    color: "#F2E8D5",
+    fontSize: 18,
+    fontWeight: "700",
+  },
+
+  sessionDescription: {
+    color: "#A99F91",
+    fontSize: 13,
+    marginTop: 5,
   },
 
   walletCard: {
@@ -526,6 +700,34 @@ const styles = StyleSheet.create({
     color: "#FFFFFF",
     fontSize: 16,
     fontWeight: "700",
+  },
+
+  noCharacterCard: {
+    backgroundColor: "#1C1916",
+    borderWidth: 1,
+    borderColor: "#3C352D",
+    borderRadius: 14,
+    padding: 20,
+  },
+
+  noCharacterTitle: {
+    color: "#F2E8D5",
+    fontSize: 18,
+    fontWeight: "700",
+  },
+
+  noCharacterDescription: {
+    color: "#A99F91",
+    fontSize: 14,
+    lineHeight: 20,
+    marginTop: 6,
+  },
+
+  noCharacterHint: {
+    color: "#D9A441",
+    fontSize: 12,
+    lineHeight: 18,
+    marginTop: 10,
   },
 
   rewardCard: {

@@ -26,50 +26,66 @@ import {
   RewardDistributionResult,
 } from "../models/Reward";
 
+import { CampaignSession } from "../models/Session";
+
+import { CampaignQuest, NewCampaignQuest } from "../models/Quest";
+
 interface NewCampaign {
   name: string;
-
   characterName: string;
-
   gameSystem: GameSystem;
-
   campaignType: CampaignType;
 }
 
 interface NewCampaignMember {
   campaignId: string;
-
   displayName: string;
-
   characterName?: string;
-
   role: CampaignMemberRole;
 }
 
 interface TransactionResult {
   success: boolean;
-
   message?: string;
-
   transaction?: Transaction;
 }
 
 interface PartyFundContributionResult {
   success: boolean;
-
   message?: string;
-
   characterTransaction?: Transaction;
-
   partyFundTransaction?: Transaction;
 }
 
 interface CampaignMemberResult {
   success: boolean;
-
   message?: string;
-
   member?: CampaignMember;
+}
+
+interface ActiveMemberResult {
+  success: boolean;
+  message?: string;
+  member?: CampaignMember;
+}
+
+interface SessionResult {
+  success: boolean;
+  message?: string;
+  session?: CampaignSession;
+}
+
+interface QuestResult {
+  success: boolean;
+  message?: string;
+  quest?: CampaignQuest;
+}
+
+interface QuestCompletionResult {
+  success: boolean;
+  message?: string;
+  quest?: CampaignQuest;
+  reward?: RewardDistribution;
 }
 
 interface CampaignContextType {
@@ -79,9 +95,17 @@ interface CampaignContextType {
 
   rewards: RewardDistribution[];
 
+  sessions: CampaignSession[];
+
+  quests: CampaignQuest[];
+
   createCampaign: (campaign: NewCampaign) => Campaign;
 
   getCampaignById: (id: string) => Campaign | undefined;
+
+  getActiveCampaignMember: (campaignId: string) => CampaignMember | undefined;
+
+  setActiveMember: (campaignId: string, memberId: string) => ActiveMemberResult;
 
   addCampaignMember: (newMember: NewCampaignMember) => CampaignMemberResult;
 
@@ -100,6 +124,20 @@ interface CampaignContextType {
 
   distributeReward: (reward: NewRewardDistribution) => RewardDistributionResult;
 
+  startSession: (campaignId: string) => SessionResult;
+
+  endSession: (campaignId: string) => SessionResult;
+
+  getActiveSession: (campaignId: string) => CampaignSession | undefined;
+
+  getCampaignSessions: (campaignId: string) => CampaignSession[];
+
+  createQuest: (quest: NewCampaignQuest) => QuestResult;
+
+  completeQuest: (campaignId: string, questId: string) => QuestCompletionResult;
+
+  getCampaignQuests: (campaignId: string) => CampaignQuest[];
+
   getCampaignTransactions: (campaignId: string) => Transaction[];
 
   getCampaignRewards: (campaignId: string) => RewardDistribution[];
@@ -116,6 +154,10 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
 
   const [rewards, setRewards] = useState<RewardDistribution[]>([]);
 
+  const [sessions, setSessions] = useState<CampaignSession[]>([]);
+
+  const [quests, setQuests] = useState<CampaignQuest[]>([]);
+
   function createCampaign(newCampaign: NewCampaign): Campaign {
     const currencySystem = getDefaultCurrencySystem(newCampaign.gameSystem);
 
@@ -123,9 +165,7 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
 
     const character = {
       id: createId(),
-
       name: newCampaign.characterName,
-
       wallet: createEmptyWallet(currencySystem),
     };
 
@@ -178,6 +218,62 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
 
   function getCampaignById(id: string) {
     return campaigns.find((campaign) => campaign.id === id);
+  }
+
+  function getActiveCampaignMember(campaignId: string) {
+    const campaign = campaigns.find((item) => item.id === campaignId);
+
+    if (!campaign) {
+      return undefined;
+    }
+
+    return campaign.members.find(
+      (member) => member.id === campaign.activeMemberId,
+    );
+  }
+
+  function setActiveMember(
+    campaignId: string,
+    memberId: string,
+  ): ActiveMemberResult {
+    const campaign = campaigns.find((item) => item.id === campaignId);
+
+    if (!campaign) {
+      return {
+        success: false,
+        message: "Campaign not found.",
+      };
+    }
+
+    const member = campaign.members.find((item) => item.id === memberId);
+
+    if (!member) {
+      return {
+        success: false,
+        message: "Campaign member not found.",
+      };
+    }
+
+    setCampaigns((currentCampaigns) =>
+      currentCampaigns.map((currentCampaign) => {
+        if (currentCampaign.id !== campaignId) {
+          return currentCampaign;
+        }
+
+        return {
+          ...currentCampaign,
+
+          activeMemberId: member.id,
+
+          activeCharacter: member.character ?? currentCampaign.activeCharacter,
+        };
+      }),
+    );
+
+    return {
+      success: true,
+      member,
+    };
   }
 
   function addCampaignMember(
@@ -304,10 +400,29 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
       };
     }
 
-    if (campaign.activeCharacter.id !== newTransaction.characterId) {
+    const activeMember = campaign.members.find(
+      (member) => member.id === campaign.activeMemberId,
+    );
+
+    if (!activeMember) {
       return {
         success: false,
-        message: "Character not found.",
+        message: "Active campaign member not found.",
+      };
+    }
+
+    if (!activeMember.character) {
+      return {
+        success: false,
+        message: "The active member does not have a character wallet.",
+      };
+    }
+
+    if (activeMember.character.id !== newTransaction.characterId) {
+      return {
+        success: false,
+        message:
+          "You can only record transactions for the active member's character.",
       };
     }
 
@@ -322,7 +437,7 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
       };
     }
 
-    const currentBalance = campaign.activeCharacter.wallet.balances.find(
+    const currentBalance = activeMember.character.wallet.balances.find(
       (balance) => balance.currencyId === newTransaction.currencyId,
     );
 
@@ -343,7 +458,6 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     if (newBalance < 0) {
       return {
         success: false,
-
         message: `Not enough ${currency.abbreviation}.`,
       };
     }
@@ -355,7 +469,7 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
 
       accountType: "character",
 
-      characterId: campaign.activeCharacter.id,
+      characterId: activeMember.character.id,
 
       type: newTransaction.type,
 
@@ -374,44 +488,50 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
           return currentCampaign;
         }
 
-        const updatedActiveCharacter = {
-          ...currentCampaign.activeCharacter,
+        const updatedMembers = currentCampaign.members.map((member) => {
+          if (
+            member.id !== currentCampaign.activeMemberId ||
+            !member.character
+          ) {
+            return member;
+          }
 
-          wallet: {
-            ...currentCampaign.activeCharacter.wallet,
+          return {
+            ...member,
 
-            balances: currentCampaign.activeCharacter.wallet.balances.map(
-              (balance) => {
-                if (balance.currencyId !== newTransaction.currencyId) {
-                  return balance;
-                }
+            character: {
+              ...member.character,
 
-                return {
-                  ...balance,
+              wallet: {
+                ...member.character.wallet,
 
-                  amount: balance.amount + signedAmount,
-                };
+                balances: member.character.wallet.balances.map((balance) => {
+                  if (balance.currencyId !== newTransaction.currencyId) {
+                    return balance;
+                  }
+
+                  return {
+                    ...balance,
+
+                    amount: balance.amount + signedAmount,
+                  };
+                }),
               },
-            ),
-          },
-        };
+            },
+          };
+        });
+
+        const updatedActiveMember = updatedMembers.find(
+          (member) => member.id === currentCampaign.activeMemberId,
+        );
 
         return {
           ...currentCampaign,
 
-          activeCharacter: updatedActiveCharacter,
+          members: updatedMembers,
 
-          members: currentCampaign.members.map((member) => {
-            if (member.character?.id !== updatedActiveCharacter.id) {
-              return member;
-            }
-
-            return {
-              ...member,
-
-              character: updatedActiveCharacter,
-            };
-          }),
+          activeCharacter:
+            updatedActiveMember?.character ?? currentCampaign.activeCharacter,
         };
       }),
     );
@@ -438,6 +558,30 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
       return {
         success: false,
         message: "Campaign not found.",
+      };
+    }
+
+    const activeMember = campaign.members.find(
+      (member) => member.id === campaign.activeMemberId,
+    );
+
+    if (!activeMember) {
+      return {
+        success: false,
+        message: "Active campaign member not found.",
+      };
+    }
+
+    if (
+      campaign.campaignType === "multiplayer" &&
+      activeMember.role !== "party-leader" &&
+      activeMember.role !== "treasurer"
+    ) {
+      return {
+        success: false,
+
+        message:
+          "Only the Party Leader or Treasurer can directly manage the Party Fund.",
       };
     }
 
@@ -556,6 +700,26 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
       };
     }
 
+    const activeMember = campaign.members.find(
+      (member) => member.id === campaign.activeMemberId,
+    );
+
+    if (!activeMember) {
+      return {
+        success: false,
+        message: "Active campaign member not found.",
+      };
+    }
+
+    if (!activeMember.character) {
+      return {
+        success: false,
+
+        message:
+          "The active member does not have a character wallet to contribute from.",
+      };
+    }
+
     if (!Number.isFinite(amount) || amount <= 0) {
       return {
         success: false,
@@ -575,14 +739,13 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
       };
     }
 
-    const characterBalance = campaign.activeCharacter.wallet.balances.find(
+    const characterBalance = activeMember.character.wallet.balances.find(
       (balance) => balance.currencyId === currencyId,
     );
 
     if (!characterBalance) {
       return {
         success: false,
-
         message: "Character wallet balance not found.",
       };
     }
@@ -591,7 +754,7 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
       return {
         success: false,
 
-        message: `Insufficient funds. ${campaign.activeCharacter.name} only has ${characterBalance.amount} ${currency.abbreviation}, but this contribution requires ${amount} ${currency.abbreviation}.`,
+        message: `Insufficient funds. ${activeMember.character.name} only has ${characterBalance.amount} ${currency.abbreviation}, but this contribution requires ${amount} ${currency.abbreviation}.`,
       };
     }
 
@@ -602,7 +765,6 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     if (!partyFundBalance) {
       return {
         success: false,
-
         message: "Party Fund balance not found.",
       };
     }
@@ -618,7 +780,7 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
 
       accountType: "character",
 
-      characterId: campaign.activeCharacter.id,
+      characterId: activeMember.character.id,
 
       type: "expense",
 
@@ -644,7 +806,7 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
 
       amount,
 
-      description: `${campaign.activeCharacter.name} contribution: ${
+      description: `${activeMember.character.name} contribution: ${
         description.trim() || "Party Fund contribution"
       }`,
 
@@ -657,44 +819,50 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
           return currentCampaign;
         }
 
-        const updatedActiveCharacter = {
-          ...currentCampaign.activeCharacter,
+        const updatedMembers = currentCampaign.members.map((member) => {
+          if (
+            member.id !== currentCampaign.activeMemberId ||
+            !member.character
+          ) {
+            return member;
+          }
 
-          wallet: {
-            ...currentCampaign.activeCharacter.wallet,
+          return {
+            ...member,
 
-            balances: currentCampaign.activeCharacter.wallet.balances.map(
-              (balance) => {
-                if (balance.currencyId !== currencyId) {
-                  return balance;
-                }
+            character: {
+              ...member.character,
 
-                return {
-                  ...balance,
+              wallet: {
+                ...member.character.wallet,
 
-                  amount: balance.amount - amount,
-                };
+                balances: member.character.wallet.balances.map((balance) => {
+                  if (balance.currencyId !== currencyId) {
+                    return balance;
+                  }
+
+                  return {
+                    ...balance,
+
+                    amount: balance.amount - amount,
+                  };
+                }),
               },
-            ),
-          },
-        };
+            },
+          };
+        });
+
+        const updatedActiveMember = updatedMembers.find(
+          (member) => member.id === currentCampaign.activeMemberId,
+        );
 
         return {
           ...currentCampaign,
 
-          activeCharacter: updatedActiveCharacter,
+          members: updatedMembers,
 
-          members: currentCampaign.members.map((member) => {
-            if (member.character?.id !== updatedActiveCharacter.id) {
-              return member;
-            }
-
-            return {
-              ...member,
-
-              character: updatedActiveCharacter,
-            };
-          }),
+          activeCharacter:
+            updatedActiveMember?.character ?? currentCampaign.activeCharacter,
 
           partyFund: {
             ...currentCampaign.partyFund,
@@ -746,6 +914,25 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
       };
     }
 
+    const activeMember = campaign.members.find(
+      (member) => member.id === campaign.activeMemberId,
+    );
+
+    if (!activeMember) {
+      return {
+        success: false,
+        message: "Active campaign member not found.",
+      };
+    }
+
+    if (campaign.campaignType === "multiplayer" && activeMember.role !== "dm") {
+      return {
+        success: false,
+
+        message: "Only the Dungeon Master can distribute campaign rewards.",
+      };
+    }
+
     if (
       !Number.isFinite(newReward.amount) ||
       newReward.amount <= 0 ||
@@ -781,16 +968,6 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
       };
     }
 
-    /*
-     * Any member with a character is currently
-     * eligible for reward distribution.
-     *
-     * A DM without a character is automatically
-     * excluded.
-     *
-     * Later this can support targeted rewards,
-     * opt-outs, companions, and inactive players.
-     */
     const recipients = campaign.members.filter(
       (
         member,
@@ -947,19 +1124,17 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
           };
         });
 
-        const activeMember = updatedMembers.find(
+        const updatedActiveMember = updatedMembers.find(
           (member) => member.id === currentCampaign.activeMemberId,
         );
-
-        const updatedActiveCharacter =
-          activeMember?.character ?? currentCampaign.activeCharacter;
 
         return {
           ...currentCampaign,
 
           members: updatedMembers,
 
-          activeCharacter: updatedActiveCharacter,
+          activeCharacter:
+            updatedActiveMember?.character ?? currentCampaign.activeCharacter,
 
           partyFund: {
             ...currentCampaign.partyFund,
@@ -999,6 +1174,370 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     };
   }
 
+  function startSession(campaignId: string): SessionResult {
+    const campaign = campaigns.find((item) => item.id === campaignId);
+
+    if (!campaign) {
+      return {
+        success: false,
+        message: "Campaign not found.",
+      };
+    }
+
+    const activeMember = campaign.members.find(
+      (member) => member.id === campaign.activeMemberId,
+    );
+
+    if (!activeMember) {
+      return {
+        success: false,
+        message: "Active campaign member not found.",
+      };
+    }
+
+    if (campaign.campaignType === "multiplayer" && activeMember.role !== "dm") {
+      return {
+        success: false,
+        message: "Only the Dungeon Master can start a session.",
+      };
+    }
+
+    const existingSession = sessions.find(
+      (session) =>
+        session.campaignId === campaignId && session.status === "active",
+    );
+
+    if (existingSession) {
+      return {
+        success: false,
+        message: "This campaign already has an active session.",
+      };
+    }
+
+    const session: CampaignSession = {
+      id: createId(),
+
+      campaignId,
+
+      status: "active",
+
+      startedByMemberId: activeMember.id,
+
+      startedAt: new Date().toISOString(),
+    };
+
+    setSessions((currentSessions) => [session, ...currentSessions]);
+
+    return {
+      success: true,
+      session,
+    };
+  }
+
+  function endSession(campaignId: string): SessionResult {
+    const campaign = campaigns.find((item) => item.id === campaignId);
+
+    if (!campaign) {
+      return {
+        success: false,
+        message: "Campaign not found.",
+      };
+    }
+
+    const activeMember = campaign.members.find(
+      (member) => member.id === campaign.activeMemberId,
+    );
+
+    if (!activeMember) {
+      return {
+        success: false,
+        message: "Active campaign member not found.",
+      };
+    }
+
+    if (campaign.campaignType === "multiplayer" && activeMember.role !== "dm") {
+      return {
+        success: false,
+        message: "Only the Dungeon Master can end a session.",
+      };
+    }
+
+    const activeSession = sessions.find(
+      (session) =>
+        session.campaignId === campaignId && session.status === "active",
+    );
+
+    if (!activeSession) {
+      return {
+        success: false,
+        message: "There is no active session to end.",
+      };
+    }
+
+    const endedSession: CampaignSession = {
+      ...activeSession,
+
+      status: "ended",
+
+      endedAt: new Date().toISOString(),
+    };
+
+    setSessions((currentSessions) =>
+      currentSessions.map((session) =>
+        session.id === activeSession.id ? endedSession : session,
+      ),
+    );
+
+    return {
+      success: true,
+      session: endedSession,
+    };
+  }
+
+  function getActiveSession(campaignId: string) {
+    return sessions.find(
+      (session) =>
+        session.campaignId === campaignId && session.status === "active",
+    );
+  }
+
+  function getCampaignSessions(campaignId: string) {
+    return sessions
+      .filter((session) => session.campaignId === campaignId)
+      .sort(
+        (a, b) =>
+          new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime(),
+      );
+  }
+
+  function createQuest(newQuest: NewCampaignQuest): QuestResult {
+    const campaign = campaigns.find((item) => item.id === newQuest.campaignId);
+
+    if (!campaign) {
+      return {
+        success: false,
+        message: "Campaign not found.",
+      };
+    }
+
+    const activeMember = campaign.members.find(
+      (member) => member.id === campaign.activeMemberId,
+    );
+
+    if (!activeMember) {
+      return {
+        success: false,
+        message: "Active campaign member not found.",
+      };
+    }
+
+    if (campaign.campaignType === "multiplayer" && activeMember.role !== "dm") {
+      return {
+        success: false,
+        message: "Only the Dungeon Master can create quests.",
+      };
+    }
+
+    const activeSession = getActiveSession(campaign.id);
+
+    if (!activeSession) {
+      return {
+        success: false,
+        message: "Start a session before creating a quest.",
+      };
+    }
+
+    const title = newQuest.title.trim();
+
+    if (!title) {
+      return {
+        success: false,
+        message: "Enter a quest title.",
+      };
+    }
+
+    if (
+      !Number.isInteger(newQuest.rewardAmount) ||
+      newQuest.rewardAmount <= 0
+    ) {
+      return {
+        success: false,
+        message: "Quest reward must be a whole number greater than zero.",
+      };
+    }
+
+    if (
+      !Number.isFinite(newQuest.partyFundPercentage) ||
+      newQuest.partyFundPercentage < 0 ||
+      newQuest.partyFundPercentage > 100
+    ) {
+      return {
+        success: false,
+        message: "Party Fund percentage must be between 0 and 100.",
+      };
+    }
+
+    const currency = campaign.currencySystem.currencies.find(
+      (item) => item.id === newQuest.currencyId,
+    );
+
+    if (!currency) {
+      return {
+        success: false,
+        message: "Quest reward currency not found.",
+      };
+    }
+
+    const quest: CampaignQuest = {
+      id: createId(),
+
+      campaignId: campaign.id,
+
+      sessionId: activeSession.id,
+
+      title,
+
+      description: newQuest.description.trim(),
+
+      currencyId: newQuest.currencyId,
+
+      rewardAmount: newQuest.rewardAmount,
+
+      partyFundPercentage: newQuest.partyFundPercentage,
+
+      status: "active",
+
+      createdByMemberId: activeMember.id,
+
+      createdAt: new Date().toISOString(),
+    };
+
+    setQuests((currentQuests) => [quest, ...currentQuests]);
+
+    return {
+      success: true,
+      quest,
+    };
+  }
+
+  function completeQuest(
+    campaignId: string,
+    questId: string,
+  ): QuestCompletionResult {
+    const campaign = campaigns.find((item) => item.id === campaignId);
+
+    if (!campaign) {
+      return {
+        success: false,
+        message: "Campaign not found.",
+      };
+    }
+
+    const activeMember = campaign.members.find(
+      (member) => member.id === campaign.activeMemberId,
+    );
+
+    if (!activeMember) {
+      return {
+        success: false,
+        message: "Active campaign member not found.",
+      };
+    }
+
+    if (campaign.campaignType === "multiplayer" && activeMember.role !== "dm") {
+      return {
+        success: false,
+        message: "Only the Dungeon Master can complete quests.",
+      };
+    }
+
+    const activeSession = getActiveSession(campaignId);
+
+    if (!activeSession) {
+      return {
+        success: false,
+        message: "A session must be active before completing a quest.",
+      };
+    }
+
+    const quest = quests.find(
+      (item) => item.id === questId && item.campaignId === campaignId,
+    );
+
+    if (!quest) {
+      return {
+        success: false,
+        message: "Quest not found.",
+      };
+    }
+
+    if (quest.status === "completed") {
+      return {
+        success: false,
+        message: "This quest has already been completed.",
+      };
+    }
+
+    const rewardResult = distributeReward({
+      campaignId,
+
+      currencyId: quest.currencyId,
+
+      amount: quest.rewardAmount,
+
+      partyFundPercentage: quest.partyFundPercentage,
+
+      description: `Quest Complete: ${quest.title}`,
+    });
+
+    if (!rewardResult.success || !rewardResult.reward) {
+      return {
+        success: false,
+
+        message:
+          rewardResult.message ?? "The quest reward could not be distributed.",
+      };
+    }
+
+    const completedQuest: CampaignQuest = {
+      ...quest,
+
+      status: "completed",
+
+      completedAt: new Date().toISOString(),
+
+      rewardDistributionId: rewardResult.reward.id,
+    };
+
+    setQuests((currentQuests) =>
+      currentQuests.map((currentQuest) =>
+        currentQuest.id === quest.id ? completedQuest : currentQuest,
+      ),
+    );
+
+    return {
+      success: true,
+
+      quest: completedQuest,
+
+      reward: rewardResult.reward,
+    };
+  }
+
+  function getCampaignQuests(campaignId: string) {
+    return quests
+      .filter((quest) => quest.campaignId === campaignId)
+      .sort((a, b) => {
+        if (a.status !== b.status) {
+          return a.status === "active" ? -1 : 1;
+        }
+
+        return (
+          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+        );
+      });
+  }
+
   function getCampaignTransactions(campaignId: string) {
     return transactions
       .filter((transaction) => transaction.campaignId === campaignId)
@@ -1026,9 +1565,17 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
 
         rewards,
 
+        sessions,
+
+        quests,
+
         createCampaign,
 
         getCampaignById,
+
+        getActiveCampaignMember,
+
+        setActiveMember,
 
         addCampaignMember,
 
@@ -1039,6 +1586,20 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
         contributeToPartyFund,
 
         distributeReward,
+
+        startSession,
+
+        endSession,
+
+        getActiveSession,
+
+        getCampaignSessions,
+
+        createQuest,
+
+        completeQuest,
+
+        getCampaignQuests,
 
         getCampaignTransactions,
 
@@ -1062,7 +1623,6 @@ export function useCampaigns() {
 
 function normalizeTransactionAmount(
   type: "income" | "expense" | "adjustment",
-
   amount: number,
 ) {
   if (type === "income") {

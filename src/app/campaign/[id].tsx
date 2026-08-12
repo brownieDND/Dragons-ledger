@@ -15,6 +15,8 @@ import { getWalletTotalBaseValue } from "../../models/Currency";
 
 import { CampaignMemberRole } from "../../models/Campaign";
 
+import { DEFAULT_FOCUS_MODE_MESSAGE } from "../../models/Session";
+
 export default function CampaignDashboardScreen() {
   const { id } = useLocalSearchParams<{
     id: string;
@@ -22,17 +24,11 @@ export default function CampaignDashboardScreen() {
 
   const {
     getCampaignById,
-
     getActiveCampaignMember,
-
     getCampaignTransactions,
-
     getCampaignRewards,
-
     getActiveSession,
-
     getCampaignQuests,
-
     getCampaignWalletRequests,
   } = useCampaigns();
 
@@ -66,6 +62,172 @@ export default function CampaignDashboardScreen() {
   const activeQuests = campaignQuests.filter(
     (quest) => quest.status === "active",
   );
+
+  const focusModeActive = Boolean(activeSession?.focusModeEnabled);
+
+  const isFocusRestrictedPlayer =
+    campaign.campaignType === "multiplayer" &&
+    focusModeActive &&
+    activeMember?.role !== "dm";
+
+  /*
+   * PLAYER FOCUS MODE DASHBOARD
+   */
+  if (isFocusRestrictedPlayer) {
+    const focusMessage =
+      activeSession?.focusMessage?.trim() || DEFAULT_FOCUS_MODE_MESSAGE;
+
+    return (
+      <SafeAreaView style={styles.container}>
+        <ScrollView contentContainerStyle={styles.focusContent}>
+          <Pressable onPress={() => router.replace("/")}>
+            <Text style={styles.focusCampaignsBack}>← Campaigns</Text>
+          </Pressable>
+
+          <View style={styles.focusHeader}>
+            <Text style={styles.focusEyebrow}>SESSION IN PROGRESS</Text>
+
+            <Text style={styles.focusTitle}>Focus Mode Active</Text>
+
+            <Text style={styles.focusCampaignName}>{campaign.name}</Text>
+          </View>
+
+          <View style={styles.focusMessageCard}>
+            <Text style={styles.focusMessageLabel}>Message from the DM</Text>
+
+            <Text style={styles.focusMessageText}>{focusMessage}</Text>
+          </View>
+
+          <View style={styles.focusPlayerCard}>
+            <Text style={styles.focusPlayerLabel}>Playing As</Text>
+
+            <Text style={styles.focusPlayerName}>
+              {activeMember?.displayName ?? "Unknown Player"}
+            </Text>
+
+            {character ? (
+              <Text style={styles.focusCharacterName}>{character.name}</Text>
+            ) : null}
+          </View>
+
+          <View style={styles.focusRestrictionCard}>
+            <Text style={styles.focusRestrictionTitle}>
+              Campaign controls are temporarily restricted
+            </Text>
+
+            <Text style={styles.focusRestrictionText}>
+              Financial actions, Party Fund controls, member management,
+              rewards, and other campaign management features are unavailable
+              while the DM has Focus Mode enabled.
+            </Text>
+          </View>
+
+          <Text style={styles.focusSectionTitle}>Current Session</Text>
+
+          <View style={styles.focusSessionCard}>
+            <View style={styles.focusStatusRow}>
+              <View>
+                <Text style={styles.focusSessionLabel}>Session Status</Text>
+
+                <Text style={styles.focusSessionActive}>ACTIVE</Text>
+              </View>
+
+              <View style={styles.focusQuestCountBox}>
+                <Text style={styles.focusQuestCount}>
+                  {activeQuests.length}
+                </Text>
+
+                <Text style={styles.focusQuestCountLabel}>
+                  {activeQuests.length === 1 ? "Active Quest" : "Active Quests"}
+                </Text>
+              </View>
+            </View>
+
+            {activeQuests.length > 0 ? (
+              <View style={styles.focusQuestList}>
+                {activeQuests.slice(0, 3).map((quest) => (
+                  <View key={quest.id} style={styles.focusQuestItem}>
+                    <Text style={styles.focusQuestDot}>•</Text>
+
+                    <Text style={styles.focusQuestTitle}>{quest.title}</Text>
+                  </View>
+                ))}
+
+                {activeQuests.length > 3 ? (
+                  <Text style={styles.focusMoreQuests}>
+                    +{activeQuests.length - 3} more
+                  </Text>
+                ) : null}
+              </View>
+            ) : (
+              <Text style={styles.focusNoQuests}>
+                There are currently no active quests.
+              </Text>
+            )}
+          </View>
+
+          <Pressable
+            style={styles.focusMessageButton}
+            onPress={() =>
+              router.push({
+                pathname: "/campaign/[id]/session",
+
+                params: {
+                  id: campaign.id,
+                },
+              })
+            }
+          >
+            <Text style={styles.focusMessageButtonTitle}>
+              Session & Message DM
+            </Text>
+
+            <Text style={styles.focusMessageButtonDescription}>
+              View the session or send a short prompt to the Dungeon Master
+            </Text>
+          </Pressable>
+
+          {__DEV__ ? (
+            <View style={styles.developmentCard}>
+              <Text style={styles.developmentLabel}>DEVELOPMENT TESTING</Text>
+
+              <Text style={styles.developmentDescription}>
+                This control only exists while developing Dragon's Ledger. It
+                lets us switch between test members even while Focus Mode is
+                restricting the player dashboard.
+              </Text>
+
+              <Pressable
+                style={styles.developmentButton}
+                onPress={() =>
+                  router.push({
+                    pathname: "/campaign/[id]/members",
+
+                    params: {
+                      id: campaign.id,
+                    },
+                  })
+                }
+              >
+                <Text style={styles.developmentButtonText}>
+                  Switch Test Member
+                </Text>
+              </Pressable>
+            </View>
+          ) : null}
+
+          <Text style={styles.focusFooter}>
+            Normal campaign access will return automatically when the Dungeon
+            Master disables Focus Mode.
+          </Text>
+        </ScrollView>
+      </SafeAreaView>
+    );
+  }
+
+  /*
+   * NORMAL CAMPAIGN DASHBOARD
+   */
 
   const walletRequests = getCampaignWalletRequests(campaign.id);
 
@@ -611,19 +773,288 @@ function NavigationButton({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-
     backgroundColor: "#12100E",
+  },
+
+  focusContent: {
+    width: "100%",
+    maxWidth: 700,
+    alignSelf: "center",
+    padding: 24,
+    paddingBottom: 60,
+  },
+
+  focusCampaignsBack: {
+    color: "#81786D",
+    fontSize: 14,
+    marginBottom: 26,
+  },
+
+  focusHeader: {
+    alignItems: "center",
+    marginBottom: 22,
+  },
+
+  focusEyebrow: {
+    color: "#C96A6A",
+    fontSize: 11,
+    fontWeight: "800",
+    letterSpacing: 1.3,
+  },
+
+  focusTitle: {
+    color: "#D9A441",
+    fontSize: 34,
+    fontWeight: "800",
+    textAlign: "center",
+    marginTop: 7,
+  },
+
+  focusCampaignName: {
+    color: "#A99F91",
+    fontSize: 15,
+    marginTop: 6,
+  },
+
+  focusMessageCard: {
+    backgroundColor: "#241B12",
+    borderWidth: 1,
+    borderColor: "#D9A441",
+    borderRadius: 16,
+    padding: 20,
+  },
+
+  focusMessageLabel: {
+    color: "#D9A441",
+    fontSize: 11,
+    fontWeight: "800",
+    textTransform: "uppercase",
+    letterSpacing: 0.7,
+  },
+
+  focusMessageText: {
+    color: "#F2E8D5",
+    fontSize: 17,
+    lineHeight: 25,
+    marginTop: 9,
+  },
+
+  focusPlayerCard: {
+    backgroundColor: "#1C1916",
+    borderWidth: 1,
+    borderColor: "#3C352D",
+    borderRadius: 12,
+    padding: 16,
+    marginTop: 14,
+  },
+
+  focusPlayerLabel: {
+    color: "#81786D",
+    fontSize: 10,
+    fontWeight: "700",
+    textTransform: "uppercase",
+  },
+
+  focusPlayerName: {
+    color: "#F2E8D5",
+    fontSize: 17,
+    fontWeight: "700",
+    marginTop: 4,
+  },
+
+  focusCharacterName: {
+    color: "#D9A441",
+    fontSize: 13,
+    marginTop: 3,
+  },
+
+  focusRestrictionCard: {
+    backgroundColor: "#2B1717",
+    borderWidth: 1,
+    borderColor: "#8B2E2E",
+    borderRadius: 12,
+    padding: 16,
+    marginTop: 14,
+  },
+
+  focusRestrictionTitle: {
+    color: "#E08A8A",
+    fontSize: 15,
+    fontWeight: "700",
+  },
+
+  focusRestrictionText: {
+    color: "#D8B5B5",
+    fontSize: 13,
+    lineHeight: 20,
+    marginTop: 6,
+  },
+
+  focusSectionTitle: {
+    color: "#D9A441",
+    fontSize: 20,
+    fontWeight: "700",
+    marginTop: 28,
+    marginBottom: 12,
+  },
+
+  focusSessionCard: {
+    backgroundColor: "#1C1916",
+    borderWidth: 1,
+    borderColor: "#54734A",
+    borderRadius: 14,
+    padding: 18,
+  },
+
+  focusStatusRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: 16,
+  },
+
+  focusSessionLabel: {
+    color: "#81786D",
+    fontSize: 10,
+    fontWeight: "700",
+    textTransform: "uppercase",
+  },
+
+  focusSessionActive: {
+    color: "#8FB573",
+    fontSize: 22,
+    fontWeight: "800",
+    marginTop: 4,
+  },
+
+  focusQuestCountBox: {
+    alignItems: "flex-end",
+  },
+
+  focusQuestCount: {
+    color: "#D9A441",
+    fontSize: 26,
+    fontWeight: "800",
+  },
+
+  focusQuestCountLabel: {
+    color: "#81786D",
+    fontSize: 11,
+    marginTop: 2,
+  },
+
+  focusQuestList: {
+    borderTopWidth: 1,
+    borderTopColor: "#302A24",
+    paddingTop: 14,
+    marginTop: 16,
+    gap: 8,
+  },
+
+  focusQuestItem: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 8,
+  },
+
+  focusQuestDot: {
+    color: "#D9A441",
+    fontSize: 16,
+  },
+
+  focusQuestTitle: {
+    flex: 1,
+    color: "#F2E8D5",
+    fontSize: 14,
+    lineHeight: 20,
+  },
+
+  focusMoreQuests: {
+    color: "#81786D",
+    fontSize: 12,
+    marginTop: 3,
+  },
+
+  focusNoQuests: {
+    color: "#A99F91",
+    fontSize: 13,
+    marginTop: 15,
+  },
+
+  focusMessageButton: {
+    backgroundColor: "#8B2E2E",
+    borderRadius: 14,
+    padding: 18,
+    marginTop: 18,
+  },
+
+  focusMessageButtonTitle: {
+    color: "#FFFFFF",
+    fontSize: 17,
+    fontWeight: "700",
+    textAlign: "center",
+  },
+
+  focusMessageButtonDescription: {
+    color: "#E2CFCF",
+    fontSize: 12,
+    lineHeight: 18,
+    textAlign: "center",
+    marginTop: 5,
+  },
+
+  developmentCard: {
+    backgroundColor: "#171612",
+    borderWidth: 1,
+    borderColor: "#4B4339",
+    borderRadius: 12,
+    padding: 16,
+    marginTop: 18,
+  },
+
+  developmentLabel: {
+    color: "#81786D",
+    fontSize: 10,
+    fontWeight: "800",
+    letterSpacing: 1,
+  },
+
+  developmentDescription: {
+    color: "#A99F91",
+    fontSize: 12,
+    lineHeight: 18,
+    marginTop: 6,
+  },
+
+  developmentButton: {
+    borderWidth: 1,
+    borderColor: "#D9A441",
+    borderRadius: 10,
+    paddingVertical: 12,
+    alignItems: "center",
+    marginTop: 12,
+  },
+
+  developmentButtonText: {
+    color: "#D9A441",
+    fontSize: 14,
+    fontWeight: "700",
+  },
+
+  focusFooter: {
+    color: "#81786D",
+    fontSize: 11,
+    lineHeight: 17,
+    textAlign: "center",
+    marginTop: 20,
+    paddingHorizontal: 12,
   },
 
   content: {
     width: "100%",
-
     maxWidth: 800,
-
     alignSelf: "center",
-
     padding: 24,
-
     paddingBottom: 50,
   },
 
@@ -633,135 +1064,96 @@ const styles = StyleSheet.create({
 
   campaignName: {
     color: "#D9A441",
-
     fontSize: 30,
-
     fontWeight: "700",
   },
 
   memberName: {
     color: "#F2E8D5",
-
     fontSize: 16,
-
     marginTop: 6,
   },
 
   roleText: {
     color: "#A99F91",
-
     fontSize: 13,
-
     marginTop: 4,
   },
 
   modeText: {
     color: "#81786D",
-
     fontSize: 12,
-
     marginTop: 5,
   },
 
   sectionTitle: {
     color: "#D9A441",
-
     fontSize: 20,
-
     fontWeight: "700",
-
     marginTop: 28,
-
     marginBottom: 12,
   },
 
   sessionCard: {
     backgroundColor: "#1C1916",
-
     borderWidth: 1,
-
     borderColor: "#3C352D",
-
     borderRadius: 14,
-
     padding: 18,
-
     flexDirection: "row",
-
     alignItems: "center",
-
     justifyContent: "space-between",
-
     gap: 14,
   },
 
   sessionCardActive: {
     backgroundColor: "#1B2118",
-
     borderColor: "#54734A",
   },
 
   sessionActiveTitle: {
     color: "#8FB573",
-
     fontSize: 18,
-
     fontWeight: "700",
   },
 
   sessionInactiveTitle: {
     color: "#F2E8D5",
-
     fontSize: 18,
-
     fontWeight: "700",
   },
 
   sessionDescription: {
     color: "#A99F91",
-
     fontSize: 13,
-
     marginTop: 5,
   },
 
   walletCard: {
     backgroundColor: "#1C1916",
-
     borderWidth: 1,
-
     borderColor: "#594A32",
-
     borderRadius: 16,
-
     padding: 20,
   },
 
   walletHeader: {
     flexDirection: "row",
-
     justifyContent: "space-between",
-
     alignItems: "flex-start",
-
     gap: 12,
-
     marginBottom: 22,
   },
 
   walletCharacter: {
     color: "#F2E8D5",
-
     fontSize: 20,
-
     fontWeight: "700",
   },
 
   walletSystem: {
     color: "#A99F91",
-
     fontSize: 13,
-
     marginTop: 5,
   },
 
@@ -771,237 +1163,163 @@ const styles = StyleSheet.create({
 
   wealthLabel: {
     color: "#A99F91",
-
     fontSize: 12,
   },
 
   wealthValue: {
     color: "#D9A441",
-
     fontSize: 20,
-
     fontWeight: "700",
-
     marginTop: 3,
   },
 
   currencyGrid: {
     flexDirection: "row",
-
     flexWrap: "wrap",
-
     gap: 10,
   },
 
   currencyItem: {
     flexGrow: 1,
-
     flexBasis: 110,
-
     backgroundColor: "#151310",
-
     borderWidth: 1,
-
     borderColor: "#3C352D",
-
     borderRadius: 12,
-
     padding: 14,
-
     alignItems: "center",
   },
 
   currencyAmount: {
     color: "#F2E8D5",
-
     fontSize: 24,
-
     fontWeight: "700",
   },
 
   currencyAbbreviation: {
     color: "#D9A441",
-
     fontSize: 14,
-
     fontWeight: "700",
-
     marginTop: 3,
   },
 
   currencyName: {
     color: "#81786D",
-
     fontSize: 11,
-
     marginTop: 4,
   },
 
   transactionButton: {
     backgroundColor: "#8B2E2E",
-
     borderRadius: 10,
-
     paddingVertical: 14,
-
     alignItems: "center",
-
     marginTop: 18,
   },
 
   transactionButtonText: {
     color: "#FFFFFF",
-
     fontSize: 16,
-
     fontWeight: "700",
   },
 
   noCharacterCard: {
     backgroundColor: "#1C1916",
-
     borderWidth: 1,
-
     borderColor: "#3C352D",
-
     borderRadius: 14,
-
     padding: 20,
   },
 
   noCharacterTitle: {
     color: "#F2E8D5",
-
     fontSize: 18,
-
     fontWeight: "700",
   },
 
   noCharacterDescription: {
     color: "#A99F91",
-
     fontSize: 14,
-
     lineHeight: 20,
-
     marginTop: 6,
   },
 
   noCharacterHint: {
     color: "#D9A441",
-
     fontSize: 12,
-
     lineHeight: 18,
-
     marginTop: 10,
   },
 
   rewardCard: {
     backgroundColor: "#241B12",
-
     borderWidth: 1,
-
     borderColor: "#8A6930",
-
     borderRadius: 14,
-
     padding: 18,
-
     flexDirection: "row",
-
     justifyContent: "space-between",
-
     alignItems: "center",
-
     gap: 16,
   },
 
   rewardTitle: {
     color: "#D9A441",
-
     fontSize: 18,
-
     fontWeight: "700",
   },
 
   rewardDescription: {
     color: "#A99F91",
-
     fontSize: 13,
-
     marginTop: 5,
   },
 
   latestRewardCard: {
     backgroundColor: "#171612",
-
     borderWidth: 1,
-
     borderColor: "#3C352D",
-
     borderRadius: 12,
-
     padding: 16,
-
     marginTop: 10,
   },
 
   latestRewardLabel: {
     color: "#81786D",
-
     fontSize: 11,
-
     fontWeight: "600",
-
     textTransform: "uppercase",
   },
 
   latestRewardDescription: {
     color: "#F2E8D5",
-
     fontSize: 15,
-
     fontWeight: "600",
-
     marginTop: 5,
   },
 
   latestRewardAmount: {
     color: "#D9A441",
-
     fontSize: 22,
-
     fontWeight: "700",
-
     marginTop: 7,
   },
 
   latestRewardSplit: {
     color: "#A99F91",
-
     fontSize: 12,
-
     marginTop: 4,
   },
 
   partyFundCard: {
     backgroundColor: "#1C1916",
-
     borderWidth: 1,
-
     borderColor: "#594A32",
-
     borderRadius: 14,
-
     padding: 18,
-
     flexDirection: "row",
-
     justifyContent: "space-between",
-
     alignItems: "center",
-
     gap: 16,
   },
 
@@ -1011,17 +1329,13 @@ const styles = StyleSheet.create({
 
   partyFundTitle: {
     color: "#F2E8D5",
-
     fontSize: 17,
-
     fontWeight: "700",
   },
 
   partyFundDescription: {
     color: "#A99F91",
-
     fontSize: 13,
-
     marginTop: 5,
   },
 
@@ -1031,113 +1345,79 @@ const styles = StyleSheet.create({
 
   partyFundValue: {
     color: "#D9A441",
-
     fontSize: 24,
-
     fontWeight: "700",
   },
 
   partyFundBaseLabel: {
     color: "#81786D",
-
     fontSize: 11,
-
     marginTop: 3,
   },
 
   grid: {
     gap: 12,
-
     marginTop: 18,
   },
 
   dashboardCard: {
     backgroundColor: "#1C1916",
-
     borderWidth: 1,
-
     borderColor: "#3C352D",
-
     borderRadius: 14,
-
     padding: 18,
-
     flexDirection: "row",
-
     alignItems: "center",
-
     justifyContent: "space-between",
-
     gap: 12,
   },
 
   cardTitle: {
     color: "#F2E8D5",
-
     fontSize: 16,
-
     fontWeight: "600",
   },
 
   cardValue: {
     color: "#D9A441",
-
     fontSize: 26,
-
     fontWeight: "700",
-
     marginTop: 8,
   },
 
   cardDescription: {
     color: "#A99F91",
-
     fontSize: 14,
-
     marginTop: 5,
   },
 
   activityCard: {
     backgroundColor: "#1C1916",
-
     borderWidth: 1,
-
     borderColor: "#3C352D",
-
     borderRadius: 14,
-
     padding: 20,
   },
 
   activityEmpty: {
     color: "#F2E8D5",
-
     fontSize: 16,
-
     fontWeight: "600",
   },
 
   activityDescription: {
     color: "#A99F91",
-
     fontSize: 14,
-
     marginTop: 6,
   },
 
   transactionRow: {
     flexDirection: "row",
-
     justifyContent: "space-between",
-
     alignItems: "center",
-
     gap: 16,
-
     paddingVertical: 12,
-
     borderBottomWidth: 1,
-
     borderBottomColor: "#302A24",
   },
 
@@ -1147,23 +1427,18 @@ const styles = StyleSheet.create({
 
   transactionDescription: {
     color: "#F2E8D5",
-
     fontSize: 15,
-
     fontWeight: "600",
   },
 
   transactionType: {
     color: "#81786D",
-
     fontSize: 12,
-
     marginTop: 4,
   },
 
   transactionAmount: {
     fontSize: 16,
-
     fontWeight: "700",
   },
 
@@ -1181,79 +1456,56 @@ const styles = StyleSheet.create({
 
   navigationButton: {
     backgroundColor: "#1C1916",
-
     borderWidth: 1,
-
     borderColor: "#3C352D",
-
     borderRadius: 12,
-
     padding: 16,
-
     flexDirection: "row",
-
     justifyContent: "space-between",
-
     alignItems: "center",
   },
 
   navigationTitle: {
     color: "#F2E8D5",
-
     fontSize: 17,
-
     fontWeight: "600",
   },
 
   navigationDescription: {
     color: "#A99F91",
-
     fontSize: 13,
-
     marginTop: 4,
   },
 
   navigationArrow: {
     color: "#D9A441",
-
     fontSize: 22,
   },
 
   notFound: {
     flex: 1,
-
     alignItems: "center",
-
     justifyContent: "center",
-
     padding: 24,
   },
 
   notFoundTitle: {
     color: "#F2E8D5",
-
     fontSize: 24,
-
     fontWeight: "700",
   },
 
   backButton: {
     backgroundColor: "#8B2E2E",
-
     borderRadius: 10,
-
     paddingHorizontal: 20,
-
     paddingVertical: 14,
-
     marginTop: 20,
   },
 
   backButtonText: {
     color: "#FFFFFF",
-
     fontSize: 16,
-
     fontWeight: "600",
   },
 });

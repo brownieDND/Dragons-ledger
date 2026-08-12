@@ -1,6 +1,6 @@
-import { router, useLocalSearchParams } from "expo-router";
+import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import {
   Pressable,
@@ -17,6 +17,15 @@ import { useCampaigns } from "../../../context/CampaignContext";
 import { CampaignQuest } from "../../../models/Quest";
 
 import { DEFAULT_FOCUS_MODE_MESSAGE } from "../../../models/Session";
+
+import { FocusModePrompt } from "../../../models/FocusPrompt";
+
+import {
+  acknowledgeFocusPrompt,
+  acknowledgePendingSessionFocusPrompts,
+  addFocusPrompt,
+  loadFocusPrompts,
+} from "../../../services/FocusPromptStorage";
 
 export default function SessionScreen() {
   const { id } = useLocalSearchParams<{
@@ -55,6 +64,14 @@ export default function SessionScreen() {
 
   const [focusMessage, setFocusMessage] = useState(DEFAULT_FOCUS_MODE_MESSAGE);
 
+  const [focusPrompts, setFocusPrompts] = useState<FocusModePrompt[]>([]);
+
+  const [playerPrompt, setPlayerPrompt] = useState("");
+
+  const [promptError, setPromptError] = useState("");
+
+  const [promptSuccess, setPromptSuccess] = useState("");
+
   const [confirmationQuestId, setConfirmationQuestId] = useState<string | null>(
     null,
   );
@@ -62,6 +79,47 @@ export default function SessionScreen() {
   const [errorMessage, setErrorMessage] = useState("");
 
   const [successMessage, setSuccessMessage] = useState("");
+
+  /*
+   * Reload Focus Mode prompts every
+   * time this screen becomes active.
+   *
+   * This is especially useful while
+   * testing different campaign members.
+   */
+  useFocusEffect(
+    useCallback(() => {
+      let cancelled = false;
+
+      async function reloadPrompts() {
+        try {
+          const loadedPrompts = await loadFocusPrompts();
+
+          if (cancelled) {
+            return;
+          }
+
+          setFocusPrompts(
+            loadedPrompts.filter((prompt) => prompt.campaignId === id),
+          );
+
+          setPromptError("");
+        } catch (error) {
+          console.error("Failed to load Focus Mode prompts:", error);
+
+          if (!cancelled) {
+            setPromptError("Focus Mode prompts could not be loaded.");
+          }
+        }
+      }
+
+      void reloadPrompts();
+
+      return () => {
+        cancelled = true;
+      };
+    }, [id]),
+  );
 
   useEffect(() => {
     if (activeSession?.focusMessage) {
@@ -109,6 +167,30 @@ export default function SessionScreen() {
   const displayedFocusMessage =
     activeSession?.focusMessage?.trim() || DEFAULT_FOCUS_MODE_MESSAGE;
 
+  const currentSessionPrompts = activeSession
+    ? focusPrompts.filter((prompt) => prompt.sessionId === activeSession.id)
+    : [];
+
+  const pendingPrompts = currentSessionPrompts.filter(
+    (prompt) => prompt.status === "pending",
+  );
+
+  const acknowledgedPrompts = currentSessionPrompts.filter(
+    (prompt) => prompt.status === "acknowledged",
+  );
+
+  const activeMemberPendingPrompt = activeMember
+    ? pendingPrompts.find(
+        (prompt) => prompt.requesterMemberId === activeMember.id,
+      )
+    : undefined;
+
+  const activeMemberPromptHistory = activeMember
+    ? currentSessionPrompts.filter(
+        (prompt) => prompt.requesterMemberId === activeMember.id,
+      )
+    : [];
+
   const currencies = [...campaign.currencySystem.currencies].sort(
     (a, b) => b.displayOrder - a.displayOrder,
   );
@@ -134,6 +216,11 @@ export default function SessionScreen() {
     setSuccessMessage("");
   }
 
+  function clearPromptMessages() {
+    setPromptError("");
+    setPromptSuccess("");
+  }
+
   function handleStartSession() {
     clearMessages();
 
@@ -148,8 +235,11 @@ export default function SessionScreen() {
     setSuccessMessage("Session started.");
   }
 
-  function handleEndSession() {
+  async function handleEndSession() {
     clearMessages();
+    clearPromptMessages();
+
+    const endingSession = activeSession;
 
     const result = endSession(campaign.id);
 
@@ -157,6 +247,25 @@ export default function SessionScreen() {
       setErrorMessage(result.message ?? "The session could not be ended.");
 
       return;
+    }
+
+    /*
+     * Close any unanswered Focus Mode
+     * prompts when the session ends.
+     */
+    if (endingSession && activeMember) {
+      try {
+        const updatedPrompts = await acknowledgePendingSessionFocusPrompts(
+          endingSession.id,
+          activeMember.id,
+        );
+
+        setFocusPrompts(
+          updatedPrompts.filter((prompt) => prompt.campaignId === campaign.id),
+        );
+      } catch (error) {
+        console.error("Failed to close Focus Mode prompts:", error);
+      }
     }
 
     setSuccessMessage("Session ended. Focus Mode was also disabled.");
@@ -206,6 +315,123 @@ export default function SessionScreen() {
     }
 
     setSuccessMessage("Focus Mode message updated.");
+  }
+
+  async function handleSendFocusPrompt() {
+    clearPromptMessages();
+
+    if (!activeMember) {
+      setPromptError("Active campaign member not found.");
+
+      return;
+    }
+
+    if (activeMember.role === "dm") {
+      setPromptError(
+        "The Dungeon Master does not need to send a Focus Mode prompt.",
+      );
+
+      return;
+    }
+
+    if (!activeSession) {
+      setPromptError("There is no active session.");
+
+      return;
+    }
+
+    if (!focusModeActive) {
+      setPromptError("Focus Mode is not active.");
+
+      return;
+    }
+
+    if (activeMemberPendingPrompt) {
+      setPromptError(
+        "You already have a prompt waiting for the Dungeon Master.",
+      );
+
+      return;
+    }
+
+    const cleanedPrompt = playerPrompt.trim();
+
+    if (!cleanedPrompt) {
+      setPromptError("Enter a message for the Dungeon Master.");
+
+      return;
+    }
+
+    if (cleanedPrompt.length > 280) {
+      setPromptError("Focus Mode prompts are limited to 280 characters.");
+
+      return;
+    }
+
+    const prompt: FocusModePrompt = {
+      id: createPromptId(),
+
+      campaignId: campaign.id,
+
+      sessionId: activeSession.id,
+
+      requesterMemberId: activeMember.id,
+
+      message: cleanedPrompt,
+
+      status: "pending",
+
+      createdAt: new Date().toISOString(),
+    };
+
+    try {
+      const updatedPrompts = await addFocusPrompt(prompt);
+
+      setFocusPrompts(
+        updatedPrompts.filter(
+          (storedPrompt) => storedPrompt.campaignId === campaign.id,
+        ),
+      );
+
+      setPlayerPrompt("");
+
+      setPromptSuccess("Your message was sent to the Dungeon Master.");
+    } catch (error) {
+      console.error("Failed to send Focus Mode prompt:", error);
+
+      setPromptError("Your Focus Mode prompt could not be saved.");
+    }
+  }
+
+  async function handleAcknowledgePrompt(prompt: FocusModePrompt) {
+    clearPromptMessages();
+
+    if (activeMember?.role !== "dm") {
+      setPromptError(
+        "Only the Dungeon Master can acknowledge Focus Mode prompts.",
+      );
+
+      return;
+    }
+
+    try {
+      const updatedPrompts = await acknowledgeFocusPrompt(
+        prompt.id,
+        activeMember.id,
+      );
+
+      setFocusPrompts(
+        updatedPrompts.filter(
+          (storedPrompt) => storedPrompt.campaignId === campaign.id,
+        ),
+      );
+
+      setPromptSuccess("Player prompt acknowledged.");
+    } catch (error) {
+      console.error("Failed to acknowledge Focus Mode prompt:", error);
+
+      setPromptError("The prompt could not be acknowledged.");
+    }
   }
 
   function handleCreateQuest() {
@@ -267,6 +493,12 @@ export default function SessionScreen() {
 
     setSuccessMessage(
       `${result.quest?.title} completed. ${reward?.grossAmount ?? 0} ${abbreviation} was distributed.`,
+    );
+  }
+
+  function getPromptMember(prompt: FocusModePrompt) {
+    return campaign.members.find(
+      (member) => member.id === prompt.requesterMemberId,
     );
   }
 
@@ -436,6 +668,202 @@ export default function SessionScreen() {
                 <Text style={styles.focusHint}>
                   A session must be active before Focus Mode can be enabled.
                 </Text>
+              ) : null}
+
+              {activeSession &&
+              activeMember?.role !== "dm" &&
+              focusModeActive ? (
+                <View style={styles.playerPromptSection}>
+                  <Text style={styles.promptSectionTitle}>Message the DM</Text>
+
+                  <Text style={styles.promptHelpText}>
+                    Send a short message if you need the DM's attention without
+                    leaving Focus Mode.
+                  </Text>
+
+                  {activeMemberPendingPrompt ? (
+                    <View style={styles.pendingPromptCard}>
+                      <Text style={styles.pendingPromptLabel}>
+                        WAITING FOR DM
+                      </Text>
+
+                      <Text style={styles.promptMessage}>
+                        {activeMemberPendingPrompt.message}
+                      </Text>
+
+                      <Text style={styles.promptDate}>
+                        Sent {formatDate(activeMemberPendingPrompt.createdAt)}
+                      </Text>
+
+                      <Text style={styles.pendingPromptHint}>
+                        You can send another prompt after the DM acknowledges
+                        this one.
+                      </Text>
+                    </View>
+                  ) : (
+                    <>
+                      <TextInput
+                        value={playerPrompt}
+                        onChangeText={(value) => {
+                          if (value.length <= 280) {
+                            setPlayerPrompt(value);
+                          }
+
+                          clearPromptMessages();
+                        }}
+                        multiline
+                        placeholder="Example: Can I make a perception check?"
+                        placeholderTextColor="#746D63"
+                        style={[styles.input, styles.playerPromptInput]}
+                      />
+
+                      <Text style={styles.characterCounter}>
+                        {playerPrompt.length}
+                        /280
+                      </Text>
+
+                      <Pressable
+                        style={styles.promptSendButton}
+                        onPress={handleSendFocusPrompt}
+                      >
+                        <Text style={styles.promptSendButtonText}>
+                          Send to DM
+                        </Text>
+                      </Pressable>
+                    </>
+                  )}
+                </View>
+              ) : null}
+
+              {activeSession &&
+              focusModeActive &&
+              activeMember?.role !== "dm" &&
+              activeMemberPromptHistory.some(
+                (prompt) => prompt.status === "acknowledged",
+              ) ? (
+                <View style={styles.promptHistorySection}>
+                  <Text style={styles.promptHistoryTitle}>Acknowledged</Text>
+
+                  {activeMemberPromptHistory
+                    .filter((prompt) => prompt.status === "acknowledged")
+                    .slice(0, 3)
+                    .map((prompt) => (
+                      <View
+                        key={prompt.id}
+                        style={styles.acknowledgedPromptCard}
+                      >
+                        <Text style={styles.acknowledgedLabel}>
+                          ACKNOWLEDGED
+                        </Text>
+
+                        <Text style={styles.promptMessage}>
+                          {prompt.message}
+                        </Text>
+                      </View>
+                    ))}
+                </View>
+              ) : null}
+
+              {canManageFocus &&
+              activeSession &&
+              focusModeActive ? (
+                <View style={styles.dmPromptSection}>
+                  <Text style={styles.promptSectionTitle}>Player Prompts</Text>
+
+                  <Text style={styles.promptHelpText}>
+                    {pendingPrompts.length}{" "}
+                    {pendingPrompts.length === 1 ? "player is" : "players are"}{" "}
+                    waiting for your attention.
+                  </Text>
+
+                  {pendingPrompts.length === 0 ? (
+                    <View style={styles.noPromptsCard}>
+                      <Text style={styles.noPromptsText}>
+                        No pending player prompts.
+                      </Text>
+                    </View>
+                  ) : (
+                    <View style={styles.promptList}>
+                      {pendingPrompts.map((prompt) => {
+                        const member = getPromptMember(prompt);
+
+                        return (
+                          <View key={prompt.id} style={styles.dmPromptCard}>
+                            <Text style={styles.promptMemberName}>
+                              {member?.displayName ?? "Unknown Player"}
+                            </Text>
+
+                            {member?.character ? (
+                              <Text style={styles.promptCharacterName}>
+                                {member.character.name}
+                              </Text>
+                            ) : null}
+
+                            <Text style={styles.promptMessage}>
+                              {prompt.message}
+                            </Text>
+
+                            <Text style={styles.promptDate}>
+                              {formatDate(prompt.createdAt)}
+                            </Text>
+
+                            <Pressable
+                              style={styles.acknowledgeButton}
+                              onPress={() => handleAcknowledgePrompt(prompt)}
+                            >
+                              <Text style={styles.acknowledgeButtonText}>
+                                Acknowledge
+                              </Text>
+                            </Pressable>
+                          </View>
+                        );
+                      })}
+                    </View>
+                  )}
+
+                  {acknowledgedPrompts.length > 0 ? (
+                    <View style={styles.dmPromptHistory}>
+                      <Text style={styles.promptHistoryTitle}>
+                        Recent Acknowledged
+                      </Text>
+
+                      {acknowledgedPrompts.slice(0, 5).map((prompt) => {
+                        const member = getPromptMember(prompt);
+
+                        return (
+                          <View
+                            key={prompt.id}
+                            style={styles.acknowledgedPromptCard}
+                          >
+                            <Text style={styles.acknowledgedLabel}>
+                              ACKNOWLEDGED
+                            </Text>
+
+                            <Text style={styles.promptMemberHistory}>
+                              {member?.displayName ?? "Unknown Player"}
+                            </Text>
+
+                            <Text style={styles.promptMessage}>
+                              {prompt.message}
+                            </Text>
+                          </View>
+                        );
+                      })}
+                    </View>
+                  ) : null}
+                </View>
+              ) : null}
+
+              {promptError ? (
+                <View style={styles.promptErrorCard}>
+                  <Text style={styles.promptErrorText}>{promptError}</Text>
+                </View>
+              ) : null}
+
+              {promptSuccess ? (
+                <View style={styles.promptSuccessCard}>
+                  <Text style={styles.promptSuccessText}>{promptSuccess}</Text>
+                </View>
               ) : null}
             </View>
           </>
@@ -696,60 +1124,48 @@ function formatDate(dateString: string) {
   return new Date(dateString).toLocaleString();
 }
 
+function createPromptId() {
+  return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-
     backgroundColor: "#12100E",
   },
 
   content: {
     width: "100%",
-
     maxWidth: 750,
-
     alignSelf: "center",
-
     padding: 24,
-
     paddingBottom: 60,
   },
 
   backText: {
     color: "#D9A441",
-
     fontSize: 15,
-
     marginBottom: 18,
   },
 
   title: {
     color: "#D9A441",
-
     fontSize: 30,
-
     fontWeight: "700",
   },
 
   subtitle: {
     color: "#A99F91",
-
     fontSize: 16,
-
     marginTop: 5,
-
     marginBottom: 20,
   },
 
   sessionCard: {
     backgroundColor: "#1C1916",
-
     borderWidth: 1,
-
     borderColor: "#3C352D",
-
     borderRadius: 16,
-
     padding: 20,
   },
 
@@ -759,263 +1175,392 @@ const styles = StyleSheet.create({
 
   sessionStatusLabel: {
     color: "#81786D",
-
     fontSize: 11,
-
     fontWeight: "700",
-
     textTransform: "uppercase",
   },
 
   activeStatus: {
     color: "#8FB573",
-
     fontSize: 24,
-
     fontWeight: "800",
-
     marginTop: 4,
   },
 
   inactiveStatus: {
     color: "#A99F91",
-
     fontSize: 24,
-
     fontWeight: "800",
-
     marginTop: 4,
   },
 
   sessionDetail: {
     color: "#F2E8D5",
-
     fontSize: 13,
-
     marginTop: 7,
   },
 
   sessionDescription: {
     color: "#A99F91",
-
     fontSize: 14,
-
     lineHeight: 20,
-
     marginTop: 8,
   },
 
   sectionTitle: {
     color: "#D9A441",
-
     fontSize: 20,
-
     fontWeight: "700",
-
     marginTop: 30,
-
     marginBottom: 12,
   },
 
   focusCard: {
     backgroundColor: "#1C1916",
-
     borderWidth: 1,
-
     borderColor: "#3C352D",
-
     borderRadius: 16,
-
     padding: 20,
   },
 
   focusCardActive: {
     backgroundColor: "#241B12",
-
     borderColor: "#D9A441",
   },
 
   focusStatusLabel: {
     color: "#81786D",
-
     fontSize: 11,
-
     fontWeight: "700",
-
     textTransform: "uppercase",
   },
 
   focusActiveText: {
     color: "#D9A441",
-
     fontSize: 24,
-
     fontWeight: "800",
-
     marginTop: 4,
   },
 
   focusInactiveText: {
     color: "#A99F91",
-
     fontSize: 24,
-
     fontWeight: "800",
-
     marginTop: 4,
   },
 
   focusDescription: {
     color: "#A99F91",
-
     fontSize: 14,
-
     lineHeight: 20,
-
     marginTop: 8,
   },
 
   focusPlayerLabel: {
     color: "#81786D",
-
     fontSize: 11,
-
     fontWeight: "700",
-
     textTransform: "uppercase",
-
     marginTop: 16,
   },
 
   focusDisplayedMessage: {
     color: "#F2E8D5",
-
     fontSize: 15,
-
     lineHeight: 22,
-
     marginTop: 6,
   },
 
   focusRestrictionBox: {
     backgroundColor: "#2B1717",
-
     borderWidth: 1,
-
     borderColor: "#8B2E2E",
-
     borderRadius: 10,
-
     padding: 13,
-
     marginTop: 16,
   },
 
   focusRestrictionText: {
     color: "#D8B5B5",
-
     fontSize: 13,
-
     lineHeight: 19,
   },
 
   focusInputLabel: {
     color: "#F2E8D5",
-
     fontSize: 14,
-
     marginTop: 18,
-
     marginBottom: 7,
   },
 
   focusMessageInput: {
     minHeight: 90,
-
     textAlignVertical: "top",
   },
 
   focusHint: {
     color: "#81786D",
-
     fontSize: 12,
-
     lineHeight: 18,
-
     marginTop: 12,
   },
 
   focusDisableButton: {
     borderWidth: 1,
-
     borderColor: "#C96A6A",
-
     borderRadius: 11,
-
     paddingVertical: 14,
-
     alignItems: "center",
-
     marginTop: 10,
   },
 
   focusDisableButtonText: {
     color: "#C96A6A",
-
     fontSize: 14,
-
     fontWeight: "700",
   },
 
   secondaryButton: {
     borderWidth: 1,
-
     borderColor: "#D9A441",
-
     borderRadius: 11,
-
     paddingVertical: 14,
-
     alignItems: "center",
-
     marginTop: 14,
   },
 
   secondaryButtonText: {
     color: "#D9A441",
-
     fontSize: 14,
-
     fontWeight: "700",
+  },
+
+  playerPromptSection: {
+    borderTopWidth: 1,
+    borderTopColor: "#594A32",
+    marginTop: 24,
+    paddingTop: 20,
+  },
+
+  dmPromptSection: {
+    borderTopWidth: 1,
+    borderTopColor: "#594A32",
+    marginTop: 24,
+    paddingTop: 20,
+  },
+
+  promptSectionTitle: {
+    color: "#D9A441",
+    fontSize: 18,
+    fontWeight: "700",
+  },
+
+  promptHelpText: {
+    color: "#A99F91",
+    fontSize: 13,
+    lineHeight: 19,
+    marginTop: 5,
+    marginBottom: 12,
+  },
+
+  playerPromptInput: {
+    minHeight: 90,
+    textAlignVertical: "top",
+  },
+
+  characterCounter: {
+    color: "#81786D",
+    fontSize: 11,
+    textAlign: "right",
+    marginTop: 5,
+  },
+
+  promptSendButton: {
+    backgroundColor: "#8B2E2E",
+    borderRadius: 10,
+    paddingVertical: 13,
+    alignItems: "center",
+    marginTop: 12,
+  },
+
+  promptSendButtonText: {
+    color: "#FFFFFF",
+    fontSize: 14,
+    fontWeight: "700",
+  },
+
+  pendingPromptCard: {
+    backgroundColor: "#171612",
+    borderWidth: 1,
+    borderColor: "#D9A441",
+    borderRadius: 10,
+    padding: 14,
+  },
+
+  pendingPromptLabel: {
+    color: "#D9A441",
+    fontSize: 11,
+    fontWeight: "800",
+  },
+
+  pendingPromptHint: {
+    color: "#81786D",
+    fontSize: 11,
+    lineHeight: 17,
+    marginTop: 9,
+  },
+
+  promptList: {
+    gap: 10,
+  },
+
+  dmPromptCard: {
+    backgroundColor: "#171612",
+    borderWidth: 1,
+    borderColor: "#8A6930",
+    borderRadius: 10,
+    padding: 14,
+  },
+
+  promptMemberName: {
+    color: "#F2E8D5",
+    fontSize: 15,
+    fontWeight: "700",
+  },
+
+  promptCharacterName: {
+    color: "#D9A441",
+    fontSize: 12,
+    marginTop: 3,
+  },
+
+  promptMessage: {
+    color: "#F2E8D5",
+    fontSize: 14,
+    lineHeight: 20,
+    marginTop: 10,
+  },
+
+  promptDate: {
+    color: "#81786D",
+    fontSize: 10,
+    marginTop: 7,
+  },
+
+  acknowledgeButton: {
+    backgroundColor: "#54734A",
+    borderRadius: 9,
+    paddingVertical: 11,
+    alignItems: "center",
+    marginTop: 12,
+  },
+
+  acknowledgeButtonText: {
+    color: "#FFFFFF",
+    fontSize: 13,
+    fontWeight: "700",
+  },
+
+  noPromptsCard: {
+    backgroundColor: "#171612",
+    borderRadius: 10,
+    padding: 13,
+  },
+
+  noPromptsText: {
+    color: "#A99F91",
+    fontSize: 13,
+  },
+
+  promptHistorySection: {
+    borderTopWidth: 1,
+    borderTopColor: "#3C352D",
+    marginTop: 20,
+    paddingTop: 16,
+  },
+
+  dmPromptHistory: {
+    marginTop: 20,
+    gap: 8,
+  },
+
+  promptHistoryTitle: {
+    color: "#A99F91",
+    fontSize: 13,
+    fontWeight: "700",
+    marginBottom: 8,
+  },
+
+  acknowledgedPromptCard: {
+    backgroundColor: "#182417",
+    borderWidth: 1,
+    borderColor: "#54734A",
+    borderRadius: 9,
+    padding: 12,
+    marginTop: 7,
+  },
+
+  acknowledgedLabel: {
+    color: "#8FB573",
+    fontSize: 10,
+    fontWeight: "800",
+  },
+
+  promptMemberHistory: {
+    color: "#C3D7BB",
+    fontSize: 12,
+    fontWeight: "600",
+    marginTop: 5,
+  },
+
+  promptErrorCard: {
+    backgroundColor: "#2B1717",
+    borderWidth: 1,
+    borderColor: "#8B2E2E",
+    borderRadius: 9,
+    padding: 12,
+    marginTop: 15,
+  },
+
+  promptErrorText: {
+    color: "#D8B5B5",
+    fontSize: 12,
+    lineHeight: 18,
+  },
+
+  promptSuccessCard: {
+    backgroundColor: "#182417",
+    borderWidth: 1,
+    borderColor: "#54734A",
+    borderRadius: 9,
+    padding: 12,
+    marginTop: 15,
+  },
+
+  promptSuccessText: {
+    color: "#C3D7BB",
+    fontSize: 12,
+    lineHeight: 18,
   },
 
   emptyCard: {
     backgroundColor: "#1C1916",
-
     borderWidth: 1,
-
     borderColor: "#3C352D",
-
     borderRadius: 12,
-
     padding: 18,
   },
 
   emptyTitle: {
     color: "#F2E8D5",
-
     fontSize: 16,
-
     fontWeight: "600",
   },
 
   emptyDescription: {
     color: "#A99F91",
-
     fontSize: 13,
-
     lineHeight: 19,
-
     marginTop: 5,
   },
 
@@ -1025,437 +1570,307 @@ const styles = StyleSheet.create({
 
   questCard: {
     backgroundColor: "#1C1916",
-
     borderWidth: 1,
-
     borderColor: "#594A32",
-
     borderRadius: 14,
-
     padding: 18,
   },
 
   completedQuestCard: {
     backgroundColor: "#171612",
-
     borderWidth: 1,
-
     borderColor: "#3C352D",
-
     borderRadius: 14,
-
     padding: 18,
   },
 
   questTitle: {
     color: "#F2E8D5",
-
     fontSize: 18,
-
     fontWeight: "700",
   },
 
   questDescription: {
     color: "#A99F91",
-
     fontSize: 14,
-
     lineHeight: 20,
-
     marginTop: 7,
   },
 
   rewardCard: {
     backgroundColor: "#151310",
-
     borderWidth: 1,
-
     borderColor: "#3C352D",
-
     borderRadius: 10,
-
     padding: 14,
-
     marginTop: 14,
   },
 
   rewardLabel: {
     color: "#81786D",
-
     fontSize: 11,
-
     fontWeight: "700",
-
     textTransform: "uppercase",
   },
 
   rewardValue: {
     color: "#D9A441",
-
     fontSize: 22,
-
     fontWeight: "700",
-
     marginTop: 4,
   },
 
   rewardFund: {
     color: "#A99F91",
-
     fontSize: 12,
-
     marginTop: 4,
   },
 
   completeButton: {
     backgroundColor: "#8B2E2E",
-
     borderRadius: 10,
-
     paddingVertical: 13,
-
     paddingHorizontal: 16,
-
     alignItems: "center",
-
     marginTop: 14,
   },
 
   completeButtonText: {
     color: "#FFFFFF",
-
     fontSize: 14,
-
     fontWeight: "700",
   },
 
   confirmCard: {
     backgroundColor: "#241B12",
-
     borderWidth: 1,
-
     borderColor: "#8A6930",
-
     borderRadius: 10,
-
     padding: 14,
-
     marginTop: 14,
   },
 
   confirmTitle: {
     color: "#D9A441",
-
     fontSize: 15,
-
     fontWeight: "700",
   },
 
   confirmText: {
     color: "#A99F91",
-
     fontSize: 13,
-
     lineHeight: 19,
-
     marginTop: 5,
   },
 
   confirmButtons: {
     flexDirection: "row",
-
     flexWrap: "wrap",
-
     gap: 8,
   },
 
   cancelButton: {
     flexGrow: 1,
-
     borderWidth: 1,
-
     borderColor: "#81786D",
-
     borderRadius: 9,
-
     paddingVertical: 12,
-
     alignItems: "center",
-
     marginTop: 14,
   },
 
   cancelButtonText: {
     color: "#A99F91",
-
     fontSize: 14,
-
     fontWeight: "600",
   },
 
   label: {
     color: "#F2E8D5",
-
     fontSize: 14,
-
     marginTop: 16,
-
     marginBottom: 7,
   },
 
   sectionLabel: {
     color: "#F2E8D5",
-
     fontSize: 14,
-
     marginTop: 18,
-
     marginBottom: 8,
   },
 
   input: {
     backgroundColor: "#1C1916",
-
     borderWidth: 1,
-
     borderColor: "#3C352D",
-
     borderRadius: 10,
-
     color: "#F2E8D5",
-
     fontSize: 16,
-
     paddingHorizontal: 14,
-
     paddingVertical: 13,
   },
 
   descriptionInput: {
     minHeight: 90,
-
     textAlignVertical: "top",
   },
 
   currencySelector: {
     flexDirection: "row",
-
     flexWrap: "wrap",
-
     gap: 8,
   },
 
   optionButton: {
     backgroundColor: "#1C1916",
-
     borderWidth: 1,
-
     borderColor: "#4B4339",
-
     borderRadius: 10,
-
     paddingHorizontal: 16,
-
     paddingVertical: 11,
   },
 
   optionButtonSelected: {
     backgroundColor: "#2A2115",
-
     borderColor: "#D9A441",
   },
 
   optionText: {
     color: "#B9AFA2",
-
     fontSize: 14,
   },
 
   optionTextSelected: {
     color: "#D9A441",
-
     fontWeight: "700",
   },
 
   helperText: {
     color: "#81786D",
-
     fontSize: 12,
-
     lineHeight: 18,
-
     marginTop: 6,
   },
 
   primaryButton: {
     backgroundColor: "#8B2E2E",
-
     borderRadius: 11,
-
     paddingVertical: 15,
-
     paddingHorizontal: 18,
-
     alignItems: "center",
-
     marginTop: 16,
   },
 
   primaryButtonText: {
     color: "#FFFFFF",
-
     fontSize: 16,
-
     fontWeight: "700",
   },
 
   endButton: {
     borderWidth: 1,
-
     borderColor: "#C96A6A",
-
     borderRadius: 11,
-
     paddingVertical: 14,
-
     alignItems: "center",
-
     marginTop: 18,
   },
 
   endButtonText: {
     color: "#C96A6A",
-
     fontSize: 15,
-
     fontWeight: "700",
   },
 
   permissionCard: {
     backgroundColor: "#171612",
-
     borderRadius: 10,
-
     padding: 13,
-
     marginTop: 14,
   },
 
   permissionText: {
     color: "#A99F91",
-
     fontSize: 13,
-
     lineHeight: 19,
   },
 
   errorCard: {
     backgroundColor: "#2B1717",
-
     borderWidth: 1,
-
     borderColor: "#8B2E2E",
-
     borderRadius: 10,
-
     padding: 14,
-
     marginTop: 16,
   },
 
   errorTitle: {
     color: "#E08A8A",
-
     fontSize: 14,
-
     fontWeight: "700",
   },
 
   errorText: {
     color: "#D8B5B5",
-
     fontSize: 13,
-
     lineHeight: 19,
-
     marginTop: 4,
   },
 
   successCard: {
     backgroundColor: "#182417",
-
     borderWidth: 1,
-
     borderColor: "#54734A",
-
     borderRadius: 10,
-
     padding: 14,
-
     marginTop: 16,
   },
 
   successTitle: {
     color: "#9CC58B",
-
     fontSize: 14,
-
     fontWeight: "700",
   },
 
   successText: {
     color: "#C3D7BB",
-
     fontSize: 13,
-
     lineHeight: 19,
-
     marginTop: 4,
   },
 
   completedLabel: {
     color: "#8FB573",
-
     fontSize: 11,
-
     fontWeight: "800",
-
     marginTop: 9,
   },
 
   completedReward: {
     color: "#D9A441",
-
     fontSize: 14,
-
     fontWeight: "600",
-
     marginTop: 5,
   },
 
   completedDate: {
     color: "#81786D",
-
     fontSize: 11,
-
     marginTop: 5,
   },
 
   centered: {
     flex: 1,
-
     justifyContent: "center",
-
     alignItems: "center",
-
     padding: 24,
   },
 
   notFoundTitle: {
     color: "#F2E8D5",
-
     fontSize: 24,
-
     fontWeight: "700",
   },
 });
+
+

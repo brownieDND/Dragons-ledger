@@ -11,6 +11,10 @@ import {
 
 import { useCampaigns } from "../context/CampaignContext";
 
+import { Campaign } from "../models/Campaign";
+
+import { getGameSystemDisplayName } from "../models/GameSystemRegistry";
+
 export default function CampaignsScreen() {
   const { campaigns } = useCampaigns();
 
@@ -38,6 +42,7 @@ export default function CampaignsScreen() {
                 key={campaign.id}
                 href={{
                   pathname: "/campaign/[id]",
+
                   params: {
                     id: campaign.id,
                   },
@@ -52,7 +57,7 @@ export default function CampaignsScreen() {
                   </Text>
 
                   <Text style={styles.campaignInfo}>
-                    {formatGameSystem(campaign.gameSystem)}
+                    {formatGameSystem(campaign)}
                     {" • "}
                     {campaign.campaignType === "solo"
                       ? "Personal"
@@ -84,142 +89,186 @@ export default function CampaignsScreen() {
   );
 }
 
-function formatGameSystem(gameSystem: string) {
-  switch (gameSystem) {
-    case "dnd-5e":
-      return "D&D 5e";
-
-    case "pathfinder-2e":
-      return "Pathfinder 2e";
-
-    default:
-      return "Custom";
+function formatGameSystem(campaign: Campaign) {
+  if (campaign.gameSystem === "custom") {
+    return campaign.customGameSystemName?.trim() || "Custom TTRPG";
   }
+
+  return getGameSystemDisplayName(campaign.gameSystem);
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+
     backgroundColor: "#12100E",
   },
 
   header: {
     paddingHorizontal: 24,
+
     paddingTop: 24,
+
     paddingBottom: 15,
   },
 
   title: {
     color: "#D9A441",
+
     fontSize: 30,
+
     fontWeight: "700",
   },
 
   subtitle: {
     color: "#F2E8D5",
+
     fontSize: 18,
+
     marginTop: 4,
   },
 
   content: {
     flexGrow: 1,
+
     paddingHorizontal: 24,
+
     paddingBottom: 32,
   },
 
   emptyState: {
     flex: 1,
+
     minHeight: 400,
+
     justifyContent: "center",
+
     alignItems: "center",
   },
 
   emptyTitle: {
     color: "#F2E8D5",
+
     fontSize: 22,
+
     fontWeight: "600",
   },
 
   emptyText: {
     color: "#A99F91",
+
     fontSize: 16,
+
     textAlign: "center",
+
     marginTop: 10,
   },
 
   campaignList: {
     width: "100%",
+
     maxWidth: 700,
+
     alignSelf: "center",
+
     gap: 12,
+
     paddingVertical: 20,
   },
 
   campaignCard: {
     backgroundColor: "#1C1916",
+
     borderWidth: 1,
+
     borderColor: "#3C352D",
+
     borderRadius: 14,
+
     padding: 18,
   },
 
   campaignName: {
     color: "#D9A441",
+
     fontSize: 20,
+
     fontWeight: "700",
   },
 
   characterName: {
     color: "#F2E8D5",
+
     fontSize: 16,
+
     marginTop: 6,
   },
 
   campaignInfo: {
     color: "#A99F91",
+
     fontSize: 14,
+
     marginTop: 8,
   },
 
   openCampaign: {
     color: "#D9A441",
+
     fontSize: 14,
+
     fontWeight: "600",
+
     marginTop: 14,
   },
 
   actions: {
     width: "100%",
+
     maxWidth: 700,
+
     alignSelf: "center",
+
     gap: 12,
+
     marginTop: "auto",
   },
 
   primaryButton: {
     backgroundColor: "#8B2E2E",
+
     paddingVertical: 16,
+
     borderRadius: 12,
+
     alignItems: "center",
   },
 
   primaryButtonText: {
     color: "#FFFFFF",
+
     fontSize: 17,
+
     fontWeight: "600",
   },
 
   secondaryButton: {
     borderWidth: 1,
+
     borderColor: "#D9A441",
+
     paddingVertical: 16,
+
     borderRadius: 12,
+
     alignItems: "center",
   },
 
   secondaryButtonText: {
     color: "#D9A441",
+
     fontSize: 17,
+
     fontWeight: "600",
   },
 });

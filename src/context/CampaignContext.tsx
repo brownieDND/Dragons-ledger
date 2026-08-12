@@ -17,10 +17,13 @@ import {
 } from "../models/Campaign";
 
 import {
+  cloneCurrencySystem,
   createEmptyWallet,
   CurrencySystem,
-  DND_5E_CURRENCY_SYSTEM,
 } from "../models/Currency";
+import {
+  createCurrencySystemForGameSystem,
+} from "../models/GameSystemRegistry";
 
 import {
   NewPartyFundTransaction,
@@ -69,8 +72,11 @@ interface NewCampaign {
   gameSystem: GameSystem;
 
   campaignType: CampaignType;
-}
 
+  currencySystem?: CurrencySystem;
+
+  customGameSystemName?: string;
+}
 interface NewCampaignMember {
   campaignId: string;
 
@@ -368,7 +374,14 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
   ]);
 
   function createCampaign(newCampaign: NewCampaign): Campaign {
-    const currencySystem = getDefaultCurrencySystem(newCampaign.gameSystem);
+    const currencySystem =
+      newCampaign.currencySystem
+        ? cloneCurrencySystem(
+            newCampaign.currencySystem,
+          )
+        : getDefaultCurrencySystem(
+            newCampaign.gameSystem,
+          );
 
     const createdAt = new Date().toISOString();
 
@@ -400,6 +413,12 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
       name: newCampaign.name,
 
       gameSystem: newCampaign.gameSystem,
+
+      customGameSystemName:
+        newCampaign.gameSystem === "custom"
+          ? newCampaign.customGameSystemName?.trim() ||
+            "Custom TTRPG"
+          : undefined,
 
       campaignType: newCampaign.campaignType,
 
@@ -2616,19 +2635,13 @@ function createId() {
   return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
-function getDefaultCurrencySystem(gameSystem: GameSystem): CurrencySystem {
-  switch (gameSystem) {
-    case "dnd-5e":
-      return DND_5E_CURRENCY_SYSTEM;
-
-    case "pathfinder-2e":
-      return DND_5E_CURRENCY_SYSTEM;
-
-    case "custom":
-      return DND_5E_CURRENCY_SYSTEM;
-
-    default:
-      return DND_5E_CURRENCY_SYSTEM;
-  }
+function getDefaultCurrencySystem(
+  gameSystem: GameSystem,
+): CurrencySystem {
+  return createCurrencySystemForGameSystem(
+    gameSystem,
+  );
 }
+
+
 

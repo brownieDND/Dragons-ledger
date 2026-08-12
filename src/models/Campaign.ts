@@ -1,6 +1,12 @@
 import { CurrencySystem, Wallet } from "./Currency";
 
-export type GameSystem = "dnd-5e" | "pathfinder-2e" | "custom";
+export type GameSystem =
+  | "dnd-5e"
+  | "pathfinder-2e"
+  | "daggerheart"
+  | "starfinder-2e"
+  | "cyberpunk-red"
+  | "custom";
 
 export type CampaignType = "solo" | "multiplayer";
 
@@ -8,7 +14,9 @@ export type CampaignMemberRole = "player" | "dm" | "party-leader" | "treasurer";
 
 export interface CampaignCharacter {
   id: string;
+
   name: string;
+
   wallet: Wallet;
 }
 
@@ -48,6 +56,12 @@ export interface Campaign {
 
   gameSystem: GameSystem;
 
+  /**
+   * Only used when gameSystem is
+   * "custom".
+   */
+  customGameSystemName?: string;
+
   campaignType: CampaignType;
 
   currencySystem: CurrencySystem;
@@ -55,11 +69,9 @@ export interface Campaign {
   /**
    * Temporary compatibility field.
    *
-   * Existing wallet and transaction screens
-   * currently depend on activeCharacter.
-   *
-   * As the member system is expanded, those
-   * screens will migrate to member characters.
+   * Existing wallet and transaction
+   * screens currently depend on
+   * activeCharacter.
    */
   activeCharacter: CampaignCharacter;
 

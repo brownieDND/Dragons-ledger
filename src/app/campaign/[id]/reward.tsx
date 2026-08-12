@@ -3,25 +3,32 @@ import { router, useLocalSearchParams } from "expo-router";
 import { useState } from "react";
 
 import {
-    Pressable,
-    SafeAreaView,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    View,
+  Pressable,
+  SafeAreaView,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
 } from "react-native";
 
 import { useCampaigns } from "../../../context/CampaignContext";
+
+import { RewardTargetMode } from "../../../models/Reward";
 
 export default function RewardScreen() {
   const { id } = useLocalSearchParams<{
     id: string;
   }>();
 
-  const { getCampaignById, distributeReward } = useCampaigns();
+  const { getCampaignById, getActiveCampaignMember, distributeReward } =
+    useCampaigns();
 
   const campaign = getCampaignById(id);
+
+  const activeMember = campaign
+    ? getActiveCampaignMember(campaign.id)
+    : undefined;
 
   const [currencyId, setCurrencyId] = useState("gold");
 
@@ -32,6 +39,14 @@ export default function RewardScreen() {
   );
 
   const [description, setDescription] = useState("");
+
+  const [targetMode, setTargetMode] = useState<RewardTargetMode>("whole-party");
+
+  const [selectedMemberIds, setSelectedMemberIds] = useState<string[]>([]);
+
+  const [finderMemberId, setFinderMemberId] = useState<string | undefined>(
+    undefined,
+  );
 
   const [errorMessage, setErrorMessage] = useState("");
 
@@ -54,25 +69,42 @@ export default function RewardScreen() {
     );
   }
 
-  const currencies = [...campaign.currencySystem.currencies].sort(
+  const currentCampaign = campaign;
+
+  const currencies = [...currentCampaign.currencySystem.currencies].sort(
     (a, b) => b.displayOrder - a.displayOrder,
   );
 
-  const selectedCurrency = campaign.currencySystem.currencies.find(
+  const selectedCurrency = currentCampaign.currencySystem.currencies.find(
     (currency) => currency.id === currencyId,
   );
 
-  /*
-   * For now, every campaign member with a character
-   * is eligible for whole-party rewards.
-   *
-   * A DM without a character is automatically excluded.
-   */
-  const eligibleMembers = campaign.members.filter((member) =>
-    Boolean(member.character),
+  const eligibleMembers = currentCampaign.members.filter(
+    (
+      member,
+    ): member is typeof member & {
+      character: NonNullable<typeof member.character>;
+    } => Boolean(member.character),
   );
 
-  const recipientCount = eligibleMembers.length;
+  const selectedRecipients = eligibleMembers.filter((member) =>
+    selectedMemberIds.includes(member.id),
+  );
+
+  const finderRecipient = eligibleMembers.find(
+    (member) => member.id === finderMemberId,
+  );
+
+  const targetRecipients =
+    targetMode === "whole-party"
+      ? eligibleMembers
+      : targetMode === "selected"
+        ? selectedRecipients
+        : finderRecipient
+          ? [finderRecipient]
+          : [];
+
+  const recipientCount = targetRecipients.length;
 
   const numericAmount = Number(amount);
 
@@ -85,11 +117,6 @@ export default function RewardScreen() {
     numericPercentage >= 0 &&
     numericPercentage <= 100 &&
     recipientCount > 0;
-
-  /*
-   * This calculation intentionally mirrors the
-   * distribution logic inside CampaignContext.
-   */
 
   const previewPercentagePartyFund = previewValid
     ? Math.floor(numericAmount * (numericPercentage / 100))
@@ -121,13 +148,56 @@ export default function RewardScreen() {
 
   const abbreviation = selectedCurrency?.abbreviation ?? "";
 
+  const canDistribute =
+    currentCampaign.campaignType === "solo" || activeMember?.role === "dm";
+
+  function handleBack() {
+    if (router.canGoBack()) {
+      router.back();
+
+      return;
+    }
+
+    router.replace({
+      pathname: "/campaign/[id]",
+
+      params: {
+        id: currentCampaign.id,
+      },
+    });
+  }
+
   function clearMessages() {
     setErrorMessage("");
     setSuccessMessage("");
   }
 
+  function handleTargetModeChange(mode: RewardTargetMode) {
+    setTargetMode(mode);
+
+    clearMessages();
+  }
+
+  function toggleSelectedMember(memberId: string) {
+    setSelectedMemberIds((current) =>
+      current.includes(memberId)
+        ? current.filter((id) => id !== memberId)
+        : [...current, memberId],
+    );
+
+    clearMessages();
+  }
+
   function handleSubmit() {
     clearMessages();
+
+    if (!canDistribute) {
+      setErrorMessage(
+        "Only the Dungeon Master can distribute campaign rewards.",
+      );
+
+      return;
+    }
 
     if (!Number.isInteger(numericAmount) || numericAmount <= 0) {
       setErrorMessage(
@@ -147,6 +217,18 @@ export default function RewardScreen() {
       return;
     }
 
+    if (targetMode === "selected" && selectedMemberIds.length === 0) {
+      setErrorMessage("Select at least one character to receive the reward.");
+
+      return;
+    }
+
+    if (targetMode === "finder" && !finderMemberId) {
+      setErrorMessage("Select the character who found the reward.");
+
+      return;
+    }
+
     if (recipientCount === 0) {
       setErrorMessage(
         "There are no eligible characters to receive this reward.",
@@ -162,7 +244,7 @@ export default function RewardScreen() {
     }
 
     const result = distributeReward({
-      campaignId: campaign.id,
+      campaignId: currentCampaign.id,
 
       currencyId,
 
@@ -171,6 +253,13 @@ export default function RewardScreen() {
       partyFundPercentage: numericPercentage,
 
       description: description.trim(),
+
+      targetMode,
+
+      recipientMemberIds:
+        targetMode === "selected" ? selectedMemberIds : undefined,
+
+      finderMemberId: targetMode === "finder" ? finderMemberId : undefined,
     });
 
     if (!result.success || !result.reward) {
@@ -184,12 +273,25 @@ export default function RewardScreen() {
     const characterWord =
       reward.recipientCount === 1 ? "character" : "characters";
 
+    const modeDescription =
+      reward.targetMode === "finder"
+        ? "Finder reward distributed."
+        : reward.targetMode === "selected"
+          ? "Targeted reward distributed."
+          : "Party reward distributed.";
+
     setSuccessMessage(
-      `Reward distributed. ${reward.amountPerRecipient} ${abbreviation} went to each of ${reward.recipientCount} ${characterWord}, and ${reward.totalPartyFundAmount} ${abbreviation} went to the Party Fund.`,
+      `${modeDescription} ${reward.amountPerRecipient} ${abbreviation} went to each of ${reward.recipientCount} ${characterWord}, and ${reward.totalPartyFundAmount} ${abbreviation} went to the Party Fund.`,
     );
 
     setAmount("");
     setDescription("");
+
+    setSelectedMemberIds([]);
+
+    setFinderMemberId(undefined);
+
+    setTargetMode("whole-party");
   }
 
   return (
@@ -198,21 +300,101 @@ export default function RewardScreen() {
         contentContainerStyle={styles.content}
         keyboardShouldPersistTaps="handled"
       >
+        <Pressable onPress={handleBack}>
+          <Text style={styles.backText}>← Campaign</Text>
+        </Pressable>
+
         <View style={styles.header}>
           <Text style={styles.title}>Distribute Reward</Text>
 
-          <Text style={styles.subtitle}>{campaign.name}</Text>
+          <Text style={styles.subtitle}>{currentCampaign.name}</Text>
         </View>
+
+        {!canDistribute ? (
+          <View style={styles.permissionCard}>
+            <Text style={styles.permissionTitle}>DM Control</Text>
+
+            <Text style={styles.permissionText}>
+              Only the Dungeon Master can distribute rewards in a multiplayer
+              campaign.
+            </Text>
+          </View>
+        ) : null}
 
         <View style={styles.infoCard}>
           <Text style={styles.infoTitle}>Reward Distribution</Text>
 
           <Text style={styles.infoText}>
-            Enter the total reward and choose how much should be allocated to
-            the Party Fund. The remaining currency is divided evenly between all
-            eligible characters.
+            Choose who receives the reward, calculate the Party Fund
+            contribution, and preview the final distribution before confirming
+            it.
           </Text>
         </View>
+
+        <Text style={styles.sectionTitle}>Distribution Mode</Text>
+
+        <View style={styles.modeSelector}>
+          <ModeButton
+            title="Whole Party"
+            description="Split between every eligible character."
+            selected={targetMode === "whole-party"}
+            onPress={() => handleTargetModeChange("whole-party")}
+          />
+
+          <ModeButton
+            title="Selected Characters"
+            description="Choose exactly which characters receive a share."
+            selected={targetMode === "selected"}
+            onPress={() => handleTargetModeChange("selected")}
+          />
+
+          <ModeButton
+            title="Finder"
+            description="Give the player portion to one character who found it."
+            selected={targetMode === "finder"}
+            onPress={() => handleTargetModeChange("finder")}
+          />
+        </View>
+
+        {targetMode === "selected" ? (
+          <>
+            <Text style={styles.sectionTitle}>Select Recipients</Text>
+
+            <View style={styles.recipientSelector}>
+              {eligibleMembers.map((member) => (
+                <RecipientButton
+                  key={member.id}
+                  name={member.character.name}
+                  memberName={member.displayName}
+                  selected={selectedMemberIds.includes(member.id)}
+                  onPress={() => toggleSelectedMember(member.id)}
+                />
+              ))}
+            </View>
+          </>
+        ) : null}
+
+        {targetMode === "finder" ? (
+          <>
+            <Text style={styles.sectionTitle}>Who Found It?</Text>
+
+            <View style={styles.recipientSelector}>
+              {eligibleMembers.map((member) => (
+                <RecipientButton
+                  key={member.id}
+                  name={member.character.name}
+                  memberName={member.displayName}
+                  selected={finderMemberId === member.id}
+                  onPress={() => {
+                    setFinderMemberId(member.id);
+
+                    clearMessages();
+                  }}
+                />
+              ))}
+            </View>
+          </>
+        ) : null}
 
         <Text style={styles.sectionTitle}>Currency</Text>
 
@@ -237,6 +419,7 @@ export default function RewardScreen() {
           value={amount}
           onChangeText={(value) => {
             setAmount(value);
+
             clearMessages();
           }}
           placeholder="Example: 1000"
@@ -266,9 +449,14 @@ export default function RewardScreen() {
           value={description}
           onChangeText={(value) => {
             setDescription(value);
+
             clearMessages();
           }}
-          placeholder="Example: Defeated the goblin chief"
+          placeholder={
+            targetMode === "finder"
+              ? "Example: Found gold hidden behind the altar"
+              : "Example: Defeated the goblin chief"
+          }
           placeholderTextColor="#746D63"
           style={[styles.input, styles.descriptionInput]}
           multiline
@@ -277,6 +465,17 @@ export default function RewardScreen() {
         <Text style={styles.sectionTitle}>Distribution Preview</Text>
 
         <View style={styles.previewCard}>
+          <PreviewRow
+            label="Mode"
+            value={
+              targetMode === "whole-party"
+                ? "Whole Party"
+                : targetMode === "selected"
+                  ? "Selected"
+                  : "Finder"
+            }
+          />
+
           <PreviewRow
             label="Total Reward"
             value={previewValid ? `${numericAmount} ${abbreviation}` : "—"}
@@ -297,18 +496,20 @@ export default function RewardScreen() {
             Character Distribution
           </Text>
 
-          {eligibleMembers.length > 0 ? (
-            eligibleMembers.map((member) => (
+          {targetRecipients.length > 0 ? (
+            targetRecipients.map((member) => (
               <PreviewRow
                 key={member.id}
-                label={member.character?.name ?? member.displayName}
+                label={member.character.name}
                 value={
                   previewValid ? `${previewPerRecipient} ${abbreviation}` : "—"
                 }
               />
             ))
           ) : (
-            <Text style={styles.noRecipientsText}>No eligible characters</Text>
+            <Text style={styles.noRecipientsText}>
+              Select at least one recipient.
+            </Text>
           )}
 
           {previewValid && previewRemainder > 0 ? (
@@ -342,19 +543,23 @@ export default function RewardScreen() {
         </View>
 
         <View style={styles.recipientCard}>
-          <Text style={styles.recipientCardTitle}>Eligible Recipients</Text>
+          <Text style={styles.recipientCardTitle}>Selected Recipients</Text>
 
           <Text style={styles.recipientCardValue}>{recipientCount}</Text>
 
           <Text style={styles.recipientCardText}>
-            {recipientCount === 1
-              ? "1 character will receive this reward."
-              : `${recipientCount} characters will receive an equal share of this reward.`}
+            {targetMode === "finder"
+              ? recipientCount === 1
+                ? "The selected finder will receive the player portion of this reward."
+                : "Select the character who found the reward."
+              : recipientCount === 1
+                ? "1 character will receive this reward."
+                : `${recipientCount} characters will receive an equal share of this reward.`}
           </Text>
 
-          {campaign.members.some((member) => !member.character) ? (
+          {currentCampaign.members.some((member) => !member.character) ? (
             <Text style={styles.excludedText}>
-              Members without characters are excluded from the distribution.
+              Members without characters cannot receive currency rewards.
             </Text>
           ) : null}
         </View>
@@ -375,11 +580,89 @@ export default function RewardScreen() {
           </View>
         ) : null}
 
-        <Pressable style={styles.primaryButton} onPress={handleSubmit}>
-          <Text style={styles.primaryButtonText}>Distribute Reward</Text>
-        </Pressable>
+        {canDistribute ? (
+          <Pressable style={styles.primaryButton} onPress={handleSubmit}>
+            <Text style={styles.primaryButtonText}>Distribute Reward</Text>
+          </Pressable>
+        ) : null}
       </ScrollView>
     </SafeAreaView>
+  );
+}
+
+interface ModeButtonProps {
+  title: string;
+
+  description: string;
+
+  selected: boolean;
+
+  onPress: () => void;
+}
+
+function ModeButton({
+  title,
+  description,
+  selected,
+  onPress,
+}: ModeButtonProps) {
+  return (
+    <Pressable
+      onPress={onPress}
+      style={[styles.modeButton, selected ? styles.modeButtonSelected : null]}
+    >
+      <Text
+        style={[
+          styles.modeButtonTitle,
+
+          selected ? styles.modeButtonTitleSelected : null,
+        ]}
+      >
+        {title}
+      </Text>
+
+      <Text style={styles.modeButtonDescription}>{description}</Text>
+    </Pressable>
+  );
+}
+
+interface RecipientButtonProps {
+  name: string;
+
+  memberName: string;
+
+  selected: boolean;
+
+  onPress: () => void;
+}
+
+function RecipientButton({
+  name,
+  memberName,
+  selected,
+  onPress,
+}: RecipientButtonProps) {
+  return (
+    <Pressable
+      onPress={onPress}
+      style={[
+        styles.recipientButton,
+
+        selected ? styles.recipientButtonSelected : null,
+      ]}
+    >
+      <Text
+        style={[
+          styles.recipientButtonName,
+
+          selected ? styles.recipientButtonNameSelected : null,
+        ]}
+      >
+        {name}
+      </Text>
+
+      <Text style={styles.recipientButtonMember}>{memberName}</Text>
+    </Pressable>
   );
 }
 
@@ -395,9 +678,15 @@ function OptionButton({ label, selected, onPress }: OptionButtonProps) {
   return (
     <Pressable
       onPress={onPress}
-      style={[styles.optionButton, selected && styles.optionButtonSelected]}
+      style={[
+        styles.optionButton,
+
+        selected ? styles.optionButtonSelected : null,
+      ]}
     >
-      <Text style={[styles.optionText, selected && styles.optionTextSelected]}>
+      <Text
+        style={[styles.optionText, selected ? styles.optionTextSelected : null]}
+      >
         {label}
       </Text>
     </Pressable>
@@ -416,13 +705,21 @@ function PreviewRow({ label, value, emphasized = false }: PreviewRowProps) {
   return (
     <View style={styles.previewRow}>
       <Text
-        style={[styles.previewLabel, emphasized && styles.previewEmphasized]}
+        style={[
+          styles.previewLabel,
+
+          emphasized ? styles.previewEmphasized : null,
+        ]}
       >
         {label}
       </Text>
 
       <Text
-        style={[styles.previewValue, emphasized && styles.previewEmphasized]}
+        style={[
+          styles.previewValue,
+
+          emphasized ? styles.previewEmphasized : null,
+        ]}
       >
         {value}
       </Text>
@@ -438,10 +735,16 @@ const styles = StyleSheet.create({
 
   content: {
     width: "100%",
-    maxWidth: 700,
+    maxWidth: 720,
     alignSelf: "center",
     padding: 24,
     paddingBottom: 50,
+  },
+
+  backText: {
+    color: "#D9A441",
+    fontSize: 15,
+    marginBottom: 18,
   },
 
   header: {
@@ -481,12 +784,105 @@ const styles = StyleSheet.create({
     marginTop: 6,
   },
 
+  permissionCard: {
+    backgroundColor: "#2B1717",
+    borderWidth: 1,
+    borderColor: "#8B2E2E",
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 14,
+  },
+
+  permissionTitle: {
+    color: "#E08A8A",
+    fontSize: 15,
+    fontWeight: "700",
+  },
+
+  permissionText: {
+    color: "#D8B5B5",
+    fontSize: 13,
+    lineHeight: 19,
+    marginTop: 5,
+  },
+
   sectionTitle: {
     color: "#D9A441",
     fontSize: 18,
     fontWeight: "700",
     marginTop: 26,
     marginBottom: 10,
+  },
+
+  modeSelector: {
+    gap: 10,
+  },
+
+  modeButton: {
+    backgroundColor: "#1C1916",
+    borderWidth: 1,
+    borderColor: "#3C352D",
+    borderRadius: 12,
+    padding: 15,
+  },
+
+  modeButtonSelected: {
+    backgroundColor: "#2A2115",
+    borderColor: "#D9A441",
+  },
+
+  modeButtonTitle: {
+    color: "#F2E8D5",
+    fontSize: 15,
+    fontWeight: "700",
+  },
+
+  modeButtonTitleSelected: {
+    color: "#D9A441",
+  },
+
+  modeButtonDescription: {
+    color: "#A99F91",
+    fontSize: 12,
+    lineHeight: 18,
+    marginTop: 4,
+  },
+
+  recipientSelector: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+
+  recipientButton: {
+    backgroundColor: "#1C1916",
+    borderWidth: 1,
+    borderColor: "#4B4339",
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 11,
+    minWidth: 130,
+  },
+
+  recipientButtonSelected: {
+    backgroundColor: "#1B2118",
+    borderColor: "#8FB573",
+  },
+
+  recipientButtonName: {
+    color: "#F2E8D5",
+    fontSize: 14,
+    fontWeight: "700",
+  },
+
+  recipientButtonNameSelected: {
+    color: "#8FB573",
+  },
+
+  recipientButtonMember: {
+    color: "#81786D",
+    fontSize: 10,
+    marginTop: 3,
   },
 
   currencySelector: {
@@ -620,6 +1016,7 @@ const styles = StyleSheet.create({
   recipientCardText: {
     color: "#F2E8D5",
     fontSize: 14,
+    lineHeight: 20,
     marginTop: 4,
   },
 
@@ -678,6 +1075,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#8B2E2E",
     borderRadius: 12,
     paddingVertical: 16,
+    paddingHorizontal: 18,
     alignItems: "center",
     marginTop: 24,
   },

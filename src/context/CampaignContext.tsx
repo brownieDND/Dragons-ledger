@@ -1539,268 +1539,524 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
   function distributeReward(
     newReward: NewRewardDistribution,
   ): RewardDistributionResult {
-    const campaign = campaigns.find((item) => item.id === newReward.campaignId);
+    const campaign = campaigns.find(
+      (item) =>
+        item.id ===
+        newReward.campaignId,
+    );
 
     if (!campaign) {
       return {
         success: false,
-        message: "Campaign not found.",
+
+        message:
+          "Campaign not found.",
       };
     }
 
-    const activeMember = campaign.members.find(
-      (member) => member.id === campaign.activeMemberId,
-    );
+    const activeMember =
+      campaign.members.find(
+        (member) =>
+          member.id ===
+          campaign.activeMemberId,
+      );
 
     if (!activeMember) {
       return {
         success: false,
-        message: "Active campaign member not found.",
-      };
-    }
 
-    if (campaign.campaignType === "multiplayer" && activeMember.role !== "dm") {
-      return {
-        success: false,
-        message: "Only the Dungeon Master can distribute campaign rewards.",
+        message:
+          "Active campaign member not found.",
       };
     }
 
     if (
-      !Number.isFinite(newReward.amount) ||
+      campaign.campaignType ===
+        "multiplayer" &&
+      activeMember.role !== "dm"
+    ) {
+      return {
+        success: false,
+
+        message:
+          "Only the Dungeon Master can distribute campaign rewards.",
+      };
+    }
+
+    if (
+      !Number.isFinite(
+        newReward.amount,
+      ) ||
       newReward.amount <= 0 ||
-      !Number.isInteger(newReward.amount)
+      !Number.isInteger(
+        newReward.amount,
+      )
     ) {
       return {
         success: false,
-        message: "Reward amount must be a whole number greater than zero.",
+
+        message:
+          "Reward amount must be a whole number greater than zero.",
       };
     }
 
     if (
-      !Number.isFinite(newReward.partyFundPercentage) ||
-      newReward.partyFundPercentage < 0 ||
-      newReward.partyFundPercentage > 100
+      !Number.isFinite(
+        newReward.partyFundPercentage,
+      ) ||
+      newReward.partyFundPercentage <
+        0 ||
+      newReward.partyFundPercentage >
+        100
     ) {
       return {
         success: false,
-        message: "Party Fund percentage must be between 0 and 100.",
+
+        message:
+          "Party Fund percentage must be between 0 and 100.",
       };
     }
 
-    const currency = campaign.currencySystem.currencies.find(
-      (item) => item.id === newReward.currencyId,
-    );
+    const currency =
+      campaign.currencySystem.currencies.find(
+        (item) =>
+          item.id ===
+          newReward.currencyId,
+      );
 
     if (!currency) {
       return {
         success: false,
-        message: "Currency not found.",
+
+        message:
+          "Currency not found.",
       };
     }
 
-    const recipients = campaign.members.filter(
-      (
-        member,
-      ): member is CampaignMember & {
-        character: NonNullable<CampaignMember["character"]>;
-      } => Boolean(member.character),
-    );
+    const eligibleRecipients =
+      campaign.members.filter(
+        (
+          member,
+        ): member is CampaignMember & {
+          character: NonNullable<
+            CampaignMember["character"]
+          >;
+        } =>
+          Boolean(
+            member.character,
+          ),
+      );
 
-    if (recipients.length === 0) {
+    if (
+      eligibleRecipients.length ===
+      0
+    ) {
       return {
         success: false,
-        message: "There are no eligible characters to receive this reward.",
+
+        message:
+          "There are no eligible characters to receive this reward.",
       };
     }
 
-    const recipientCount = recipients.length;
+    const targetMode =
+      newReward.targetMode ??
+      "whole-party";
 
-    const percentagePartyFundAmount = Math.floor(
-      newReward.amount * (newReward.partyFundPercentage / 100),
-    );
+    let recipients: Array<
+      CampaignMember & {
+        character: NonNullable<
+          CampaignMember["character"]
+        >;
+      }
+    > = [];
 
-    const afterPartyFund = newReward.amount - percentagePartyFundAmount;
+    if (
+      targetMode ===
+      "whole-party"
+    ) {
+      recipients =
+        eligibleRecipients;
+    } else if (
+      targetMode === "selected"
+    ) {
+      const selectedIds =
+        Array.from(
+          new Set(
+            newReward.recipientMemberIds ??
+              [],
+          ),
+        );
 
-    const amountPerRecipient = Math.floor(afterPartyFund / recipientCount);
+      if (
+        selectedIds.length === 0
+      ) {
+        return {
+          success: false,
 
-    const distributedAmount = amountPerRecipient * recipientCount;
+          message:
+            "Select at least one character to receive this reward.",
+        };
+      }
 
-    const remainderAmount = afterPartyFund - distributedAmount;
+      recipients =
+        eligibleRecipients.filter(
+          (member) =>
+            selectedIds.includes(
+              member.id,
+            ),
+        );
 
-    const totalPartyFundAmount = percentagePartyFundAmount + remainderAmount;
+      if (
+        recipients.length !==
+        selectedIds.length
+      ) {
+        return {
+          success: false,
 
-    const createdAt = new Date().toISOString();
+          message:
+            "One or more selected reward recipients are no longer eligible.",
+        };
+      }
+    } else if (
+      targetMode === "finder"
+    ) {
+      if (
+        !newReward.finderMemberId
+      ) {
+        return {
+          success: false,
 
-    const rewardId = createId();
+          message:
+            "Select the character who found this reward.",
+        };
+      }
 
-    const description = newReward.description.trim() || "Campaign reward";
+      const finder =
+        eligibleRecipients.find(
+          (member) =>
+            member.id ===
+            newReward.finderMemberId,
+        );
 
-    const reward: RewardDistribution = {
-      id: rewardId,
+      if (!finder) {
+        return {
+          success: false,
 
-      campaignId: campaign.id,
+          message:
+            "The selected finder is no longer eligible to receive this reward.",
+        };
+      }
 
-      currencyId: newReward.currencyId,
+      recipients = [finder];
+    } else {
+      return {
+        success: false,
 
-      grossAmount: newReward.amount,
-
-      partyFundPercentage: newReward.partyFundPercentage,
-
-      percentagePartyFundAmount,
-
-      remainderAmount,
-
-      totalPartyFundAmount,
-
-      distributedAmount,
-
-      recipientCount,
-
-      amountPerRecipient,
-
-      description,
-
-      createdAt,
-    };
-
-    const newTransactions: Transaction[] = [];
-
-    if (amountPerRecipient > 0) {
-      recipients.forEach((member) => {
-        newTransactions.push({
-          id: `${rewardId}-${member.character.id}`,
-
-          campaignId: campaign.id,
-
-          accountType: "character",
-
-          characterId: member.character.id,
-
-          type: "income",
-
-          currencyId: newReward.currencyId,
-
-          amount: amountPerRecipient,
-
-          description: `Reward: ${description}`,
-
-          createdAt,
-        });
-      });
+        message:
+          "Reward target mode is invalid.",
+      };
     }
 
-    if (totalPartyFundAmount > 0) {
+    const recipientCount =
+      recipients.length;
+
+    const percentagePartyFundAmount =
+      Math.floor(
+        newReward.amount *
+          (newReward.partyFundPercentage /
+            100),
+      );
+
+    const afterPartyFund =
+      newReward.amount -
+      percentagePartyFundAmount;
+
+    const amountPerRecipient =
+      Math.floor(
+        afterPartyFund /
+          recipientCount,
+      );
+
+    const distributedAmount =
+      amountPerRecipient *
+      recipientCount;
+
+    const remainderAmount =
+      afterPartyFund -
+      distributedAmount;
+
+    const totalPartyFundAmount =
+      percentagePartyFundAmount +
+      remainderAmount;
+
+    const createdAt =
+      new Date().toISOString();
+
+    const rewardId =
+      createId();
+
+    const description =
+      newReward.description.trim() ||
+      "Campaign reward";
+
+    const recipientMemberIds =
+      recipients.map(
+        (member) =>
+          member.id,
+      );
+
+    const reward: RewardDistribution =
+      {
+        id: rewardId,
+
+        campaignId:
+          campaign.id,
+
+        currencyId:
+          newReward.currencyId,
+
+        grossAmount:
+          newReward.amount,
+
+        partyFundPercentage:
+          newReward.partyFundPercentage,
+
+        percentagePartyFundAmount,
+
+        remainderAmount,
+
+        totalPartyFundAmount,
+
+        distributedAmount,
+
+        recipientCount,
+
+        amountPerRecipient,
+
+        targetMode,
+
+        recipientMemberIds,
+
+        finderMemberId:
+          targetMode === "finder"
+            ? recipients[0]?.id
+            : undefined,
+
+        description,
+
+        createdAt,
+      };
+
+    const newTransactions: Transaction[] =
+      [];
+
+    if (
+      amountPerRecipient > 0
+    ) {
+      recipients.forEach(
+        (member) => {
+          newTransactions.push({
+            id: `${rewardId}-${member.character.id}`,
+
+            campaignId:
+              campaign.id,
+
+            accountType:
+              "character",
+
+            characterId:
+              member.character.id,
+
+            type: "income",
+
+            currencyId:
+              newReward.currencyId,
+
+            amount:
+              amountPerRecipient,
+
+            description:
+              targetMode ===
+              "finder"
+                ? `Discovery Reward: ${description}`
+                : `Reward: ${description}`,
+
+            createdAt,
+          });
+        },
+      );
+    }
+
+    if (
+      totalPartyFundAmount > 0
+    ) {
       newTransactions.push({
         id: `${rewardId}-party-fund`,
 
-        campaignId: campaign.id,
+        campaignId:
+          campaign.id,
 
-        accountType: "party-fund",
+        accountType:
+          "party-fund",
 
         type: "income",
 
-        currencyId: newReward.currencyId,
+        currencyId:
+          newReward.currencyId,
 
-        amount: totalPartyFundAmount,
+        amount:
+          totalPartyFundAmount,
 
-        description: `Reward allocation: ${description}`,
+        description:
+          `Reward allocation: ${description}`,
 
         createdAt,
       });
     }
 
-    setCampaigns((currentCampaigns) =>
-      currentCampaigns.map((currentCampaign) => {
-        if (currentCampaign.id !== campaign.id) {
-          return currentCampaign;
-        }
+    setCampaigns(
+      (currentCampaigns) =>
+        currentCampaigns.map(
+          (currentCampaign) => {
+            if (
+              currentCampaign.id !==
+              campaign.id
+            ) {
+              return currentCampaign;
+            }
 
-        const updatedMembers = currentCampaign.members.map((member) => {
-          if (!member.character) {
-            return member;
-          }
+            const updatedMembers =
+              currentCampaign.members.map(
+                (member) => {
+                  if (
+                    !member.character
+                  ) {
+                    return member;
+                  }
 
-          const isRecipient = recipients.some(
-            (recipient) => recipient.character.id === member.character?.id,
-          );
+                  const isRecipient =
+                    recipients.some(
+                      (recipient) =>
+                        recipient.character
+                          .id ===
+                        member.character
+                          ?.id,
+                    );
 
-          if (!isRecipient) {
-            return member;
-          }
-
-          return {
-            ...member,
-
-            character: {
-              ...member.character,
-
-              wallet: {
-                ...member.character.wallet,
-
-                balances: member.character.wallet.balances.map((balance) => {
-                  if (balance.currencyId !== newReward.currencyId) {
-                    return balance;
+                  if (
+                    !isRecipient
+                  ) {
+                    return member;
                   }
 
                   return {
-                    ...balance,
+                    ...member,
 
-                    amount: balance.amount + amountPerRecipient,
-                  };
-                }),
-              },
-            },
-          };
-        });
+                    character: {
+                      ...member.character,
 
-        const updatedActiveMember = updatedMembers.find(
-          (member) => member.id === currentCampaign.activeMemberId,
-        );
+                      wallet: {
+                        ...member
+                          .character
+                          .wallet,
 
-        return {
-          ...currentCampaign,
+                        balances:
+                          member.character.wallet.balances.map(
+                            (
+                              balance,
+                            ) => {
+                              if (
+                                balance.currencyId !==
+                                newReward.currencyId
+                              ) {
+                                return balance;
+                              }
 
-          members: updatedMembers,
+                              return {
+                                ...balance,
 
-          activeCharacter:
-            updatedActiveMember?.character ?? currentCampaign.activeCharacter,
-
-          partyFund: {
-            ...currentCampaign.partyFund,
-
-            wallet: {
-              ...currentCampaign.partyFund.wallet,
-
-              balances: currentCampaign.partyFund.wallet.balances.map(
-                (balance) => {
-                  if (balance.currencyId !== newReward.currencyId) {
-                    return balance;
-                  }
-
-                  return {
-                    ...balance,
-
-                    amount: balance.amount + totalPartyFundAmount,
+                                amount:
+                                  balance.amount +
+                                  amountPerRecipient,
+                              };
+                            },
+                          ),
+                      },
+                    },
                   };
                 },
-              ),
-            },
+              );
+
+            const updatedActiveMember =
+              updatedMembers.find(
+                (member) =>
+                  member.id ===
+                  currentCampaign.activeMemberId,
+              );
+
+            return {
+              ...currentCampaign,
+
+              members:
+                updatedMembers,
+
+              activeCharacter:
+                updatedActiveMember?.character ??
+                currentCampaign.activeCharacter,
+
+              partyFund: {
+                ...currentCampaign.partyFund,
+
+                wallet: {
+                  ...currentCampaign
+                    .partyFund.wallet,
+
+                  balances:
+                    currentCampaign.partyFund.wallet.balances.map(
+                      (balance) => {
+                        if (
+                          balance.currencyId !==
+                          newReward.currencyId
+                        ) {
+                          return balance;
+                        }
+
+                        return {
+                          ...balance,
+
+                          amount:
+                            balance.amount +
+                            totalPartyFundAmount,
+                        };
+                      },
+                    ),
+                },
+              },
+            };
           },
-        };
-      }),
+        ),
     );
 
-    setTransactions((currentTransactions) => [
-      ...newTransactions,
+    setTransactions(
+      (currentTransactions) => [
+        ...newTransactions,
 
-      ...currentTransactions,
-    ]);
+        ...currentTransactions,
+      ],
+    );
 
-    setRewards((currentRewards) => [reward, ...currentRewards]);
+    setRewards(
+      (currentRewards) => [
+        reward,
+
+        ...currentRewards,
+      ],
+    );
 
     return {
       success: true,
+
       reward,
     };
   }
@@ -2375,3 +2631,4 @@ function getDefaultCurrencySystem(gameSystem: GameSystem): CurrencySystem {
       return DND_5E_CURRENCY_SYSTEM;
   }
 }
+

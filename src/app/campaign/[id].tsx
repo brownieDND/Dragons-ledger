@@ -684,7 +684,19 @@ export default function CampaignDashboardScreen() {
             }
           />
 
-          <NavigationButton title="Assets" description="View valuable items" />
+          <NavigationButton
+            title="Assets"
+            description="View and manage Party Assets"
+            onPress={() =>
+              router.push({
+                pathname: "/campaign/[id]/assets",
+
+                params: {
+                  id: campaign.id,
+                },
+              })
+            }
+          />
 
           <NavigationButton
             title="Notes"
@@ -1557,3 +1569,5 @@ const styles = StyleSheet.create({
     fontWeight: "600",
   },
 });
+
+

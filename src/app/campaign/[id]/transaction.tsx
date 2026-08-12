@@ -23,8 +23,12 @@ export default function TransactionScreen() {
     id: string;
   }>();
 
-  const { getCampaignById, getActiveCampaignMember, createTransaction } =
-    useCampaigns();
+  const {
+    getCampaignById,
+    getActiveCampaignMember,
+    createTransaction,
+    requestWalletTransaction,
+  } = useCampaigns();
 
   const campaign = getCampaignById(id);
 
@@ -38,6 +42,8 @@ export default function TransactionScreen() {
   const [description, setDescription] = useState("");
 
   const [errorMessage, setErrorMessage] = useState("");
+
+  const [successMessage, setSuccessMessage] = useState("");
 
   if (!campaign) {
     return (
@@ -65,6 +71,7 @@ export default function TransactionScreen() {
 
     router.replace({
       pathname: "/campaign/[id]",
+
       params: {
         id: campaign.id,
       },
@@ -120,34 +127,45 @@ export default function TransactionScreen() {
 
   const currentBalance = getWalletBalance(character.wallet, currencyId);
 
-  function clearError() {
-    if (errorMessage) {
-      setErrorMessage("");
-    }
+  const numericAmount = Number(amount);
+
+  const requiresApproval =
+    campaign.campaignType === "multiplayer" &&
+    activeMember.role !== "dm" &&
+    (transactionType === "income" ||
+      (transactionType === "adjustment" &&
+        Number.isFinite(numericAmount) &&
+        numericAmount > 0));
+
+  function clearMessages() {
+    setErrorMessage("");
+    setSuccessMessage("");
   }
 
   function handleTypeChange(type: TransactionType) {
     setTransactionType(type);
-    clearError();
+
+    clearMessages();
   }
 
   function handleCurrencyChange(newCurrencyId: string) {
     setCurrencyId(newCurrencyId);
-    clearError();
+
+    clearMessages();
   }
 
   function handleSubmit() {
-    setErrorMessage("");
+    clearMessages();
 
-    const numericAmount = Number(amount);
+    const submittedAmount = Number(amount);
 
-    if (!Number.isFinite(numericAmount) || numericAmount === 0) {
+    if (!Number.isFinite(submittedAmount) || submittedAmount === 0) {
       setErrorMessage("Enter an amount greater than zero.");
 
       return;
     }
 
-    if (transactionType !== "adjustment" && numericAmount < 0) {
+    if (transactionType !== "adjustment" && submittedAmount < 0) {
       setErrorMessage(
         "Income and expense amounts must be entered as positive numbers.",
       );
@@ -165,13 +183,13 @@ export default function TransactionScreen() {
 
     if (
       transactionType === "expense" &&
-      Math.abs(numericAmount) > currentBalance
+      Math.abs(submittedAmount) > currentBalance
     ) {
       const abbreviation = selectedCurrency?.abbreviation ?? "";
 
       setErrorMessage(
         `Insufficient funds. ${character.name} only has ${currentBalance} ${abbreviation} available, but this expense requires ${Math.abs(
-          numericAmount,
+          submittedAmount,
         )} ${abbreviation}.`,
       );
 
@@ -180,8 +198,8 @@ export default function TransactionScreen() {
 
     if (
       transactionType === "adjustment" &&
-      numericAmount < 0 &&
-      currentBalance + numericAmount < 0
+      submittedAmount < 0 &&
+      currentBalance + submittedAmount < 0
     ) {
       const abbreviation = selectedCurrency?.abbreviation ?? "";
 
@@ -192,10 +210,58 @@ export default function TransactionScreen() {
       return;
     }
 
-    let transactionAmount = Math.abs(numericAmount);
+    let transactionAmount = Math.abs(submittedAmount);
 
-    if (transactionType === "adjustment" && numericAmount < 0) {
-      transactionAmount = numericAmount;
+    if (transactionType === "adjustment") {
+      transactionAmount = submittedAmount;
+    }
+
+    /*
+     * Only positive wallet additions require
+     * DM approval in multiplayer campaigns.
+     *
+     * Expenses and negative adjustments
+     * happen immediately.
+     */
+    const shouldRequestApproval =
+      campaign.campaignType === "multiplayer" &&
+      activeMember.role !== "dm" &&
+      (transactionType === "income" ||
+        (transactionType === "adjustment" && submittedAmount > 0));
+
+    if (shouldRequestApproval) {
+      const result = requestWalletTransaction({
+        campaignId: campaign.id,
+
+        characterId: character.id,
+
+        type: transactionType,
+
+        currencyId,
+
+        amount: transactionAmount,
+
+        description: description.trim(),
+      });
+
+      if (!result.success) {
+        setErrorMessage(
+          result.message ?? "The wallet request could not be sent.",
+        );
+
+        return;
+      }
+
+      const abbreviation = selectedCurrency?.abbreviation ?? "";
+
+      setSuccessMessage(
+        `${transactionAmount} ${abbreviation} is waiting for Dungeon Master approval.`,
+      );
+
+      setAmount("");
+      setDescription("");
+
+      return;
     }
 
     const result = createTransaction({
@@ -229,11 +295,28 @@ export default function TransactionScreen() {
         contentContainerStyle={styles.content}
         keyboardShouldPersistTaps="handled"
       >
+        <Pressable onPress={handleBackToCampaign}>
+          <Text style={styles.backText}>← Campaign</Text>
+        </Pressable>
+
         <Text style={styles.heading}>New Transaction</Text>
 
         <Text style={styles.member}>{activeMember.displayName}</Text>
 
         <Text style={styles.character}>{character.name}</Text>
+
+        {campaign.campaignType === "multiplayer" &&
+        activeMember.role !== "dm" ? (
+          <View style={styles.approvalInfoCard}>
+            <Text style={styles.approvalInfoTitle}>DM Approval Required</Text>
+
+            <Text style={styles.approvalInfoText}>
+              Income and positive wallet adjustments are sent to the Dungeon
+              Master for approval. Your balance will not change until the
+              request is approved.
+            </Text>
+          </View>
+        ) : null}
 
         <Text style={styles.sectionTitle}>Transaction Type</Text>
 
@@ -287,7 +370,8 @@ export default function TransactionScreen() {
           value={amount}
           onChangeText={(value) => {
             setAmount(value);
-            clearError();
+
+            clearMessages();
           }}
           placeholder={
             transactionType === "adjustment"
@@ -301,8 +385,8 @@ export default function TransactionScreen() {
 
         {transactionType === "adjustment" ? (
           <Text style={styles.helperText}>
-            Use a positive number to add currency or a negative number to remove
-            it.
+            Positive adjustments require DM approval in multiplayer. Negative
+            adjustments remove currency immediately.
           </Text>
         ) : null}
 
@@ -312,13 +396,25 @@ export default function TransactionScreen() {
           value={description}
           onChangeText={(value) => {
             setDescription(value);
-            clearError();
+
+            clearMessages();
           }}
-          placeholder="Example: Bought healing potions"
+          placeholder="Example: Found 100 GP in a chest"
           placeholderTextColor="#746D63"
           style={[styles.input, styles.descriptionInput]}
           multiline
         />
+
+        {requiresApproval ? (
+          <View style={styles.pendingPreview}>
+            <Text style={styles.pendingPreviewTitle}>Approval Request</Text>
+
+            <Text style={styles.pendingPreviewText}>
+              Submitting this will not change your wallet yet. The DM must
+              approve it first.
+            </Text>
+          </View>
+        ) : null}
 
         {errorMessage ? (
           <View style={styles.errorCard}>
@@ -328,8 +424,20 @@ export default function TransactionScreen() {
           </View>
         ) : null}
 
+        {successMessage ? (
+          <View style={styles.successCard}>
+            <Text style={styles.successTitle}>Request Sent</Text>
+
+            <Text style={styles.successText}>{successMessage}</Text>
+          </View>
+        ) : null}
+
         <Pressable style={styles.primaryButton} onPress={handleSubmit}>
-          <Text style={styles.primaryButtonText}>Record Transaction</Text>
+          <Text style={styles.primaryButtonText}>
+            {requiresApproval
+              ? "Send DM Approval Request"
+              : "Record Transaction"}
+          </Text>
         </Pressable>
       </ScrollView>
     </SafeAreaView>
@@ -338,7 +446,9 @@ export default function TransactionScreen() {
 
 interface OptionButtonProps {
   label: string;
+
   selected: boolean;
+
   onPress: () => void;
 }
 
@@ -369,6 +479,12 @@ const styles = StyleSheet.create({
     paddingBottom: 50,
   },
 
+  backText: {
+    color: "#D9A441",
+    fontSize: 15,
+    marginBottom: 18,
+  },
+
   heading: {
     color: "#D9A441",
     fontSize: 28,
@@ -386,6 +502,28 @@ const styles = StyleSheet.create({
     fontSize: 14,
     marginTop: 3,
     marginBottom: 10,
+  },
+
+  approvalInfoCard: {
+    backgroundColor: "#241B12",
+    borderWidth: 1,
+    borderColor: "#8A6930",
+    borderRadius: 12,
+    padding: 15,
+    marginTop: 18,
+  },
+
+  approvalInfoTitle: {
+    color: "#D9A441",
+    fontSize: 15,
+    fontWeight: "700",
+  },
+
+  approvalInfoText: {
+    color: "#A99F91",
+    fontSize: 13,
+    lineHeight: 19,
+    marginTop: 5,
   },
 
   sectionTitle: {
@@ -477,7 +615,30 @@ const styles = StyleSheet.create({
   helperText: {
     color: "#81786D",
     fontSize: 12,
+    lineHeight: 18,
     marginTop: 7,
+  },
+
+  pendingPreview: {
+    backgroundColor: "#171612",
+    borderWidth: 1,
+    borderColor: "#594A32",
+    borderRadius: 10,
+    padding: 14,
+    marginTop: 18,
+  },
+
+  pendingPreviewTitle: {
+    color: "#D9A441",
+    fontSize: 14,
+    fontWeight: "700",
+  },
+
+  pendingPreviewText: {
+    color: "#A99F91",
+    fontSize: 13,
+    lineHeight: 19,
+    marginTop: 4,
   },
 
   errorCard: {
@@ -502,6 +663,28 @@ const styles = StyleSheet.create({
     marginTop: 5,
   },
 
+  successCard: {
+    backgroundColor: "#182417",
+    borderWidth: 1,
+    borderColor: "#54734A",
+    borderRadius: 10,
+    padding: 14,
+    marginTop: 20,
+  },
+
+  successTitle: {
+    color: "#9CC58B",
+    fontSize: 15,
+    fontWeight: "700",
+  },
+
+  successText: {
+    color: "#C3D7BB",
+    fontSize: 14,
+    lineHeight: 20,
+    marginTop: 5,
+  },
+
   primaryButton: {
     backgroundColor: "#8B2E2E",
     borderRadius: 12,
@@ -515,6 +698,7 @@ const styles = StyleSheet.create({
     color: "#FFFFFF",
     fontSize: 17,
     fontWeight: "700",
+    textAlign: "center",
   },
 
   notFound: {

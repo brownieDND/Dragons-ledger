@@ -32,6 +32,8 @@ export default function CampaignDashboardScreen() {
     getActiveSession,
 
     getCampaignQuests,
+
+    getCampaignWalletRequests,
   } = useCampaigns();
 
   const campaign = getCampaignById(id);
@@ -63,6 +65,15 @@ export default function CampaignDashboardScreen() {
 
   const activeQuests = campaignQuests.filter(
     (quest) => quest.status === "active",
+  );
+
+  const walletRequests = getCampaignWalletRequests(campaign.id);
+
+  const pendingActions = walletRequests.filter(
+    (request) =>
+      request.status === "pending" &&
+      (activeMember?.role === "dm" ||
+        request.requesterMemberId === activeMember?.id),
   );
 
   const currencies = [...campaign.currencySystem.currencies].sort(
@@ -160,6 +171,8 @@ export default function CampaignDashboardScreen() {
               {activeSession
                 ? `${activeQuests.length} active ${
                     activeQuests.length === 1 ? "quest" : "quests"
+                  }${
+                    activeSession.focusModeEnabled ? " • Focus Mode active" : ""
                   }`
                 : "Start or view campaign sessions and quests"}
             </Text>
@@ -331,6 +344,15 @@ export default function CampaignDashboardScreen() {
                 ? "Solo campaign"
                 : "Campaign members"
             }
+            onPress={() =>
+              router.push({
+                pathname: "/campaign/[id]/members",
+
+                params: {
+                  id: campaign.id,
+                },
+              })
+            }
           />
 
           <DashboardCard
@@ -339,12 +361,38 @@ export default function CampaignDashboardScreen() {
             description={
               activeSession ? "Current campaign quests" : "No session active"
             }
+            onPress={() =>
+              router.push({
+                pathname: "/campaign/[id]/session",
+
+                params: {
+                  id: campaign.id,
+                },
+              })
+            }
           />
 
           <DashboardCard
-            title="Pending Actions"
-            value="0"
-            description="Nothing needs your attention"
+            title={
+              activeMember?.role === "dm"
+                ? "Pending Actions"
+                : "Wallet Requests"
+            }
+            value={`${pendingActions.length}`}
+            description={
+              pendingActions.length === 0
+                ? "Nothing needs your attention"
+                : `${pendingActions.length} awaiting review`
+            }
+            onPress={() =>
+              router.push({
+                pathname: "/campaign/[id]/approvals",
+
+                params: {
+                  id: campaign.id,
+                },
+              })
+            }
           />
         </View>
 
@@ -400,10 +448,32 @@ export default function CampaignDashboardScreen() {
         <View style={styles.navigation}>
           <NavigationButton
             title="Session & Quests"
-            description="Manage sessions and campaign quests"
+            description="Manage sessions, quests, and Focus Mode"
             onPress={() =>
               router.push({
                 pathname: "/campaign/[id]/session",
+
+                params: {
+                  id: campaign.id,
+                },
+              })
+            }
+          />
+
+          <NavigationButton
+            title={
+              activeMember?.role === "dm"
+                ? "Pending Actions"
+                : "Wallet Requests"
+            }
+            description={
+              activeMember?.role === "dm"
+                ? "Approve or decline player wallet additions"
+                : "View your DM approval requests"
+            }
+            onPress={() =>
+              router.push({
+                pathname: "/campaign/[id]/approvals",
 
                 params: {
                   id: campaign.id,
@@ -483,25 +553,40 @@ function formatTransactionType(type: string) {
 
 interface DashboardCardProps {
   title: string;
+
   value: string;
+
   description: string;
+
+  onPress: () => void;
 }
 
-function DashboardCard({ title, value, description }: DashboardCardProps) {
+function DashboardCard({
+  title,
+  value,
+  description,
+  onPress,
+}: DashboardCardProps) {
   return (
-    <View style={styles.dashboardCard}>
-      <Text style={styles.cardTitle}>{title}</Text>
+    <Pressable style={styles.dashboardCard} onPress={onPress}>
+      <View style={styles.cardText}>
+        <Text style={styles.cardTitle}>{title}</Text>
 
-      <Text style={styles.cardValue}>{value}</Text>
+        <Text style={styles.cardValue}>{value}</Text>
 
-      <Text style={styles.cardDescription}>{description}</Text>
-    </View>
+        <Text style={styles.cardDescription}>{description}</Text>
+      </View>
+
+      <Text style={styles.navigationArrow}>→</Text>
+    </Pressable>
   );
 }
 
 interface NavigationButtonProps {
   title: string;
+
   description: string;
+
   onPress?: () => void;
 }
 
@@ -526,14 +611,19 @@ function NavigationButton({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+
     backgroundColor: "#12100E",
   },
 
   content: {
     width: "100%",
+
     maxWidth: 800,
+
     alignSelf: "center",
+
     padding: 24,
+
     paddingBottom: 50,
   },
 
@@ -543,96 +633,135 @@ const styles = StyleSheet.create({
 
   campaignName: {
     color: "#D9A441",
+
     fontSize: 30,
+
     fontWeight: "700",
   },
 
   memberName: {
     color: "#F2E8D5",
+
     fontSize: 16,
+
     marginTop: 6,
   },
 
   roleText: {
     color: "#A99F91",
+
     fontSize: 13,
+
     marginTop: 4,
   },
 
   modeText: {
     color: "#81786D",
+
     fontSize: 12,
+
     marginTop: 5,
   },
 
   sectionTitle: {
     color: "#D9A441",
+
     fontSize: 20,
+
     fontWeight: "700",
+
     marginTop: 28,
+
     marginBottom: 12,
   },
 
   sessionCard: {
     backgroundColor: "#1C1916",
+
     borderWidth: 1,
+
     borderColor: "#3C352D",
+
     borderRadius: 14,
+
     padding: 18,
+
     flexDirection: "row",
+
     alignItems: "center",
+
     justifyContent: "space-between",
+
     gap: 14,
   },
 
   sessionCardActive: {
     backgroundColor: "#1B2118",
+
     borderColor: "#54734A",
   },
 
   sessionActiveTitle: {
     color: "#8FB573",
+
     fontSize: 18,
+
     fontWeight: "700",
   },
 
   sessionInactiveTitle: {
     color: "#F2E8D5",
+
     fontSize: 18,
+
     fontWeight: "700",
   },
 
   sessionDescription: {
     color: "#A99F91",
+
     fontSize: 13,
+
     marginTop: 5,
   },
 
   walletCard: {
     backgroundColor: "#1C1916",
+
     borderWidth: 1,
+
     borderColor: "#594A32",
+
     borderRadius: 16,
+
     padding: 20,
   },
 
   walletHeader: {
     flexDirection: "row",
+
     justifyContent: "space-between",
+
     alignItems: "flex-start",
+
     gap: 12,
+
     marginBottom: 22,
   },
 
   walletCharacter: {
     color: "#F2E8D5",
+
     fontSize: 20,
+
     fontWeight: "700",
   },
 
   walletSystem: {
     color: "#A99F91",
+
     fontSize: 13,
+
     marginTop: 5,
   },
 
@@ -642,163 +771,237 @@ const styles = StyleSheet.create({
 
   wealthLabel: {
     color: "#A99F91",
+
     fontSize: 12,
   },
 
   wealthValue: {
     color: "#D9A441",
+
     fontSize: 20,
+
     fontWeight: "700",
+
     marginTop: 3,
   },
 
   currencyGrid: {
     flexDirection: "row",
+
     flexWrap: "wrap",
+
     gap: 10,
   },
 
   currencyItem: {
     flexGrow: 1,
+
     flexBasis: 110,
+
     backgroundColor: "#151310",
+
     borderWidth: 1,
+
     borderColor: "#3C352D",
+
     borderRadius: 12,
+
     padding: 14,
+
     alignItems: "center",
   },
 
   currencyAmount: {
     color: "#F2E8D5",
+
     fontSize: 24,
+
     fontWeight: "700",
   },
 
   currencyAbbreviation: {
     color: "#D9A441",
+
     fontSize: 14,
+
     fontWeight: "700",
+
     marginTop: 3,
   },
 
   currencyName: {
     color: "#81786D",
+
     fontSize: 11,
+
     marginTop: 4,
   },
 
   transactionButton: {
     backgroundColor: "#8B2E2E",
+
     borderRadius: 10,
+
     paddingVertical: 14,
+
     alignItems: "center",
+
     marginTop: 18,
   },
 
   transactionButtonText: {
     color: "#FFFFFF",
+
     fontSize: 16,
+
     fontWeight: "700",
   },
 
   noCharacterCard: {
     backgroundColor: "#1C1916",
+
     borderWidth: 1,
+
     borderColor: "#3C352D",
+
     borderRadius: 14,
+
     padding: 20,
   },
 
   noCharacterTitle: {
     color: "#F2E8D5",
+
     fontSize: 18,
+
     fontWeight: "700",
   },
 
   noCharacterDescription: {
     color: "#A99F91",
+
     fontSize: 14,
+
     lineHeight: 20,
+
     marginTop: 6,
   },
 
   noCharacterHint: {
     color: "#D9A441",
+
     fontSize: 12,
+
     lineHeight: 18,
+
     marginTop: 10,
   },
 
   rewardCard: {
     backgroundColor: "#241B12",
+
     borderWidth: 1,
+
     borderColor: "#8A6930",
+
     borderRadius: 14,
+
     padding: 18,
+
     flexDirection: "row",
+
     justifyContent: "space-between",
+
     alignItems: "center",
+
     gap: 16,
   },
 
   rewardTitle: {
     color: "#D9A441",
+
     fontSize: 18,
+
     fontWeight: "700",
   },
 
   rewardDescription: {
     color: "#A99F91",
+
     fontSize: 13,
+
     marginTop: 5,
   },
 
   latestRewardCard: {
     backgroundColor: "#171612",
+
     borderWidth: 1,
+
     borderColor: "#3C352D",
+
     borderRadius: 12,
+
     padding: 16,
+
     marginTop: 10,
   },
 
   latestRewardLabel: {
     color: "#81786D",
+
     fontSize: 11,
+
     fontWeight: "600",
+
     textTransform: "uppercase",
   },
 
   latestRewardDescription: {
     color: "#F2E8D5",
+
     fontSize: 15,
+
     fontWeight: "600",
+
     marginTop: 5,
   },
 
   latestRewardAmount: {
     color: "#D9A441",
+
     fontSize: 22,
+
     fontWeight: "700",
+
     marginTop: 7,
   },
 
   latestRewardSplit: {
     color: "#A99F91",
+
     fontSize: 12,
+
     marginTop: 4,
   },
 
   partyFundCard: {
     backgroundColor: "#1C1916",
+
     borderWidth: 1,
+
     borderColor: "#594A32",
+
     borderRadius: 14,
+
     padding: 18,
+
     flexDirection: "row",
+
     justifyContent: "space-between",
+
     alignItems: "center",
+
     gap: 16,
   },
 
@@ -808,13 +1011,17 @@ const styles = StyleSheet.create({
 
   partyFundTitle: {
     color: "#F2E8D5",
+
     fontSize: 17,
+
     fontWeight: "700",
   },
 
   partyFundDescription: {
     color: "#A99F91",
+
     fontSize: 13,
+
     marginTop: 5,
   },
 
@@ -824,75 +1031,113 @@ const styles = StyleSheet.create({
 
   partyFundValue: {
     color: "#D9A441",
+
     fontSize: 24,
+
     fontWeight: "700",
   },
 
   partyFundBaseLabel: {
     color: "#81786D",
+
     fontSize: 11,
+
     marginTop: 3,
   },
 
   grid: {
     gap: 12,
+
     marginTop: 18,
   },
 
   dashboardCard: {
     backgroundColor: "#1C1916",
+
     borderWidth: 1,
+
     borderColor: "#3C352D",
+
     borderRadius: 14,
+
     padding: 18,
+
+    flexDirection: "row",
+
+    alignItems: "center",
+
+    justifyContent: "space-between",
+
+    gap: 12,
   },
 
   cardTitle: {
     color: "#F2E8D5",
+
     fontSize: 16,
+
     fontWeight: "600",
   },
 
   cardValue: {
     color: "#D9A441",
+
     fontSize: 26,
+
     fontWeight: "700",
+
     marginTop: 8,
   },
 
   cardDescription: {
     color: "#A99F91",
+
     fontSize: 14,
+
     marginTop: 5,
   },
 
   activityCard: {
     backgroundColor: "#1C1916",
+
     borderWidth: 1,
+
     borderColor: "#3C352D",
+
     borderRadius: 14,
+
     padding: 20,
   },
 
   activityEmpty: {
     color: "#F2E8D5",
+
     fontSize: 16,
+
     fontWeight: "600",
   },
 
   activityDescription: {
     color: "#A99F91",
+
     fontSize: 14,
+
     marginTop: 6,
   },
 
   transactionRow: {
     flexDirection: "row",
+
     justifyContent: "space-between",
+
     alignItems: "center",
+
     gap: 16,
+
     paddingVertical: 12,
+
     borderBottomWidth: 1,
+
     borderBottomColor: "#302A24",
   },
 
@@ -902,18 +1147,23 @@ const styles = StyleSheet.create({
 
   transactionDescription: {
     color: "#F2E8D5",
+
     fontSize: 15,
+
     fontWeight: "600",
   },
 
   transactionType: {
     color: "#81786D",
+
     fontSize: 12,
+
     marginTop: 4,
   },
 
   transactionAmount: {
     fontSize: 16,
+
     fontWeight: "700",
   },
 
@@ -931,56 +1181,79 @@ const styles = StyleSheet.create({
 
   navigationButton: {
     backgroundColor: "#1C1916",
+
     borderWidth: 1,
+
     borderColor: "#3C352D",
+
     borderRadius: 12,
+
     padding: 16,
+
     flexDirection: "row",
+
     justifyContent: "space-between",
+
     alignItems: "center",
   },
 
   navigationTitle: {
     color: "#F2E8D5",
+
     fontSize: 17,
+
     fontWeight: "600",
   },
 
   navigationDescription: {
     color: "#A99F91",
+
     fontSize: 13,
+
     marginTop: 4,
   },
 
   navigationArrow: {
     color: "#D9A441",
+
     fontSize: 22,
   },
 
   notFound: {
     flex: 1,
+
     alignItems: "center",
+
     justifyContent: "center",
+
     padding: 24,
   },
 
   notFoundTitle: {
     color: "#F2E8D5",
+
     fontSize: 24,
+
     fontWeight: "700",
   },
 
   backButton: {
     backgroundColor: "#8B2E2E",
+
     borderRadius: 10,
+
     paddingHorizontal: 20,
+
     paddingVertical: 14,
+
     marginTop: 20,
   },
 
   backButtonText: {
     color: "#FFFFFF",
+
     fontSize: 16,
+
     fontWeight: "600",
   },
 });

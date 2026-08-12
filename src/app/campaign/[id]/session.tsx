@@ -1,6 +1,6 @@
 import { router, useLocalSearchParams } from "expo-router";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import {
   Pressable,
@@ -16,6 +16,8 @@ import { useCampaigns } from "../../../context/CampaignContext";
 
 import { CampaignQuest } from "../../../models/Quest";
 
+import { DEFAULT_FOCUS_MODE_MESSAGE } from "../../../models/Session";
+
 export default function SessionScreen() {
   const { id } = useLocalSearchParams<{
     id: string;
@@ -28,11 +30,18 @@ export default function SessionScreen() {
     getCampaignQuests,
     startSession,
     endSession,
+    setFocusMode,
     createQuest,
     completeQuest,
   } = useCampaigns();
 
   const campaign = getCampaignById(id);
+
+  const activeMember = campaign
+    ? getActiveCampaignMember(campaign.id)
+    : undefined;
+
+  const activeSession = campaign ? getActiveSession(campaign.id) : undefined;
 
   const [title, setTitle] = useState("");
 
@@ -44,6 +53,8 @@ export default function SessionScreen() {
 
   const [partyFundPercentage, setPartyFundPercentage] = useState("");
 
+  const [focusMessage, setFocusMessage] = useState(DEFAULT_FOCUS_MODE_MESSAGE);
+
   const [confirmationQuestId, setConfirmationQuestId] = useState<string | null>(
     null,
   );
@@ -51,6 +62,16 @@ export default function SessionScreen() {
   const [errorMessage, setErrorMessage] = useState("");
 
   const [successMessage, setSuccessMessage] = useState("");
+
+  useEffect(() => {
+    if (activeSession?.focusMessage) {
+      setFocusMessage(activeSession.focusMessage);
+
+      return;
+    }
+
+    setFocusMessage(DEFAULT_FOCUS_MODE_MESSAGE);
+  }, [activeSession?.id, activeSession?.focusMessage]);
 
   if (!campaign) {
     return (
@@ -69,10 +90,6 @@ export default function SessionScreen() {
     );
   }
 
-  const activeMember = getActiveCampaignMember(campaign.id);
-
-  const activeSession = getActiveSession(campaign.id);
-
   const quests = getCampaignQuests(campaign.id);
 
   const activeQuests = quests.filter((quest) => quest.status === "active");
@@ -83,6 +100,14 @@ export default function SessionScreen() {
 
   const canManageSession =
     campaign.campaignType === "solo" || activeMember?.role === "dm";
+
+  const canManageFocus =
+    campaign.campaignType === "multiplayer" && activeMember?.role === "dm";
+
+  const focusModeActive = Boolean(activeSession?.focusModeEnabled);
+
+  const displayedFocusMessage =
+    activeSession?.focusMessage?.trim() || DEFAULT_FOCUS_MODE_MESSAGE;
 
   const currencies = [...campaign.currencySystem.currencies].sort(
     (a, b) => b.displayOrder - a.displayOrder,
@@ -97,6 +122,7 @@ export default function SessionScreen() {
 
     router.replace({
       pathname: "/campaign/[id]",
+
       params: {
         id: campaign.id,
       },
@@ -133,9 +159,53 @@ export default function SessionScreen() {
       return;
     }
 
-    setSuccessMessage("Session ended.");
+    setSuccessMessage("Session ended. Focus Mode was also disabled.");
 
     setConfirmationQuestId(null);
+  }
+
+  function handleEnableFocusMode() {
+    clearMessages();
+
+    const result = setFocusMode(campaign.id, true, focusMessage);
+
+    if (!result.success) {
+      setErrorMessage(result.message ?? "Focus Mode could not be enabled.");
+
+      return;
+    }
+
+    setSuccessMessage("Focus Mode enabled.");
+  }
+
+  function handleDisableFocusMode() {
+    clearMessages();
+
+    const result = setFocusMode(campaign.id, false, focusMessage);
+
+    if (!result.success) {
+      setErrorMessage(result.message ?? "Focus Mode could not be disabled.");
+
+      return;
+    }
+
+    setSuccessMessage("Focus Mode disabled.");
+  }
+
+  function handleSaveFocusMessage() {
+    clearMessages();
+
+    const result = setFocusMode(campaign.id, true, focusMessage);
+
+    if (!result.success) {
+      setErrorMessage(
+        result.message ?? "The Focus Mode message could not be saved.",
+      );
+
+      return;
+    }
+
+    setSuccessMessage("Focus Mode message updated.");
   }
 
   function handleCreateQuest() {
@@ -149,10 +219,15 @@ export default function SessionScreen() {
 
     const result = createQuest({
       campaignId: campaign.id,
+
       title,
+
       description,
+
       currencyId,
+
       rewardAmount: numericReward,
+
       partyFundPercentage: numericPercentage,
     });
 
@@ -212,6 +287,7 @@ export default function SessionScreen() {
         <View
           style={[
             styles.sessionCard,
+
             activeSession ? styles.activeSessionCard : null,
           ]}
         >
@@ -260,6 +336,110 @@ export default function SessionScreen() {
             </View>
           )}
         </View>
+
+        {campaign.campaignType === "multiplayer" ? (
+          <>
+            <Text style={styles.sectionTitle}>Focus Mode</Text>
+
+            <View
+              style={[
+                styles.focusCard,
+
+                focusModeActive ? styles.focusCardActive : null,
+              ]}
+            >
+              <Text style={styles.focusStatusLabel}>Focus Mode Status</Text>
+
+              <Text
+                style={
+                  focusModeActive
+                    ? styles.focusActiveText
+                    : styles.focusInactiveText
+                }
+              >
+                {focusModeActive ? "ACTIVE" : "INACTIVE"}
+              </Text>
+
+              {focusModeActive ? (
+                <>
+                  <Text style={styles.focusPlayerLabel}>
+                    Message to Players
+                  </Text>
+
+                  <Text style={styles.focusDisplayedMessage}>
+                    {displayedFocusMessage}
+                  </Text>
+
+                  {activeMember?.role !== "dm" ? (
+                    <View style={styles.focusRestrictionBox}>
+                      <Text style={styles.focusRestrictionText}>
+                        Financial actions are temporarily restricted while Focus
+                        Mode is active.
+                      </Text>
+                    </View>
+                  ) : null}
+                </>
+              ) : (
+                <Text style={styles.focusDescription}>
+                  Focus Mode lets the DM temporarily restrict player financial
+                  actions while the session is being run.
+                </Text>
+              )}
+
+              {canManageFocus && activeSession ? (
+                <>
+                  <Text style={styles.focusInputLabel}>Player Message</Text>
+
+                  <TextInput
+                    value={focusMessage}
+                    onChangeText={setFocusMessage}
+                    multiline
+                    placeholder={DEFAULT_FOCUS_MODE_MESSAGE}
+                    placeholderTextColor="#746D63"
+                    style={[styles.input, styles.focusMessageInput]}
+                  />
+
+                  {focusModeActive ? (
+                    <>
+                      <Pressable
+                        style={styles.secondaryButton}
+                        onPress={handleSaveFocusMessage}
+                      >
+                        <Text style={styles.secondaryButtonText}>
+                          Save Message
+                        </Text>
+                      </Pressable>
+
+                      <Pressable
+                        style={styles.focusDisableButton}
+                        onPress={handleDisableFocusMode}
+                      >
+                        <Text style={styles.focusDisableButtonText}>
+                          Disable Focus Mode
+                        </Text>
+                      </Pressable>
+                    </>
+                  ) : (
+                    <Pressable
+                      style={styles.primaryButton}
+                      onPress={handleEnableFocusMode}
+                    >
+                      <Text style={styles.primaryButtonText}>
+                        Enable Focus Mode
+                      </Text>
+                    </Pressable>
+                  )}
+                </>
+              ) : null}
+
+              {!activeSession ? (
+                <Text style={styles.focusHint}>
+                  A session must be active before Focus Mode can be enabled.
+                </Text>
+              ) : null}
+            </View>
+          </>
+        ) : null}
 
         {errorMessage ? (
           <View style={styles.errorCard}>
@@ -519,41 +699,57 @@ function formatDate(dateString: string) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+
     backgroundColor: "#12100E",
   },
 
   content: {
     width: "100%",
+
     maxWidth: 750,
+
     alignSelf: "center",
+
     padding: 24,
+
     paddingBottom: 60,
   },
 
   backText: {
     color: "#D9A441",
+
     fontSize: 15,
+
     marginBottom: 18,
   },
 
   title: {
     color: "#D9A441",
+
     fontSize: 30,
+
     fontWeight: "700",
   },
 
   subtitle: {
     color: "#A99F91",
+
     fontSize: 16,
+
     marginTop: 5,
+
     marginBottom: 20,
   },
 
   sessionCard: {
     backgroundColor: "#1C1916",
+
     borderWidth: 1,
+
     borderColor: "#3C352D",
+
     borderRadius: 16,
+
     padding: 20,
   },
 
@@ -563,64 +759,263 @@ const styles = StyleSheet.create({
 
   sessionStatusLabel: {
     color: "#81786D",
+
     fontSize: 11,
+
     fontWeight: "700",
+
     textTransform: "uppercase",
   },
 
   activeStatus: {
     color: "#8FB573",
+
     fontSize: 24,
+
     fontWeight: "800",
+
     marginTop: 4,
   },
 
   inactiveStatus: {
     color: "#A99F91",
+
     fontSize: 24,
+
     fontWeight: "800",
+
     marginTop: 4,
   },
 
   sessionDetail: {
     color: "#F2E8D5",
+
     fontSize: 13,
+
     marginTop: 7,
   },
 
   sessionDescription: {
     color: "#A99F91",
+
     fontSize: 14,
+
     lineHeight: 20,
+
     marginTop: 8,
   },
 
   sectionTitle: {
     color: "#D9A441",
+
     fontSize: 20,
+
     fontWeight: "700",
+
     marginTop: 30,
+
     marginBottom: 12,
+  },
+
+  focusCard: {
+    backgroundColor: "#1C1916",
+
+    borderWidth: 1,
+
+    borderColor: "#3C352D",
+
+    borderRadius: 16,
+
+    padding: 20,
+  },
+
+  focusCardActive: {
+    backgroundColor: "#241B12",
+
+    borderColor: "#D9A441",
+  },
+
+  focusStatusLabel: {
+    color: "#81786D",
+
+    fontSize: 11,
+
+    fontWeight: "700",
+
+    textTransform: "uppercase",
+  },
+
+  focusActiveText: {
+    color: "#D9A441",
+
+    fontSize: 24,
+
+    fontWeight: "800",
+
+    marginTop: 4,
+  },
+
+  focusInactiveText: {
+    color: "#A99F91",
+
+    fontSize: 24,
+
+    fontWeight: "800",
+
+    marginTop: 4,
+  },
+
+  focusDescription: {
+    color: "#A99F91",
+
+    fontSize: 14,
+
+    lineHeight: 20,
+
+    marginTop: 8,
+  },
+
+  focusPlayerLabel: {
+    color: "#81786D",
+
+    fontSize: 11,
+
+    fontWeight: "700",
+
+    textTransform: "uppercase",
+
+    marginTop: 16,
+  },
+
+  focusDisplayedMessage: {
+    color: "#F2E8D5",
+
+    fontSize: 15,
+
+    lineHeight: 22,
+
+    marginTop: 6,
+  },
+
+  focusRestrictionBox: {
+    backgroundColor: "#2B1717",
+
+    borderWidth: 1,
+
+    borderColor: "#8B2E2E",
+
+    borderRadius: 10,
+
+    padding: 13,
+
+    marginTop: 16,
+  },
+
+  focusRestrictionText: {
+    color: "#D8B5B5",
+
+    fontSize: 13,
+
+    lineHeight: 19,
+  },
+
+  focusInputLabel: {
+    color: "#F2E8D5",
+
+    fontSize: 14,
+
+    marginTop: 18,
+
+    marginBottom: 7,
+  },
+
+  focusMessageInput: {
+    minHeight: 90,
+
+    textAlignVertical: "top",
+  },
+
+  focusHint: {
+    color: "#81786D",
+
+    fontSize: 12,
+
+    lineHeight: 18,
+
+    marginTop: 12,
+  },
+
+  focusDisableButton: {
+    borderWidth: 1,
+
+    borderColor: "#C96A6A",
+
+    borderRadius: 11,
+
+    paddingVertical: 14,
+
+    alignItems: "center",
+
+    marginTop: 10,
+  },
+
+  focusDisableButtonText: {
+    color: "#C96A6A",
+
+    fontSize: 14,
+
+    fontWeight: "700",
+  },
+
+  secondaryButton: {
+    borderWidth: 1,
+
+    borderColor: "#D9A441",
+
+    borderRadius: 11,
+
+    paddingVertical: 14,
+
+    alignItems: "center",
+
+    marginTop: 14,
+  },
+
+  secondaryButtonText: {
+    color: "#D9A441",
+
+    fontSize: 14,
+
+    fontWeight: "700",
   },
 
   emptyCard: {
     backgroundColor: "#1C1916",
+
     borderWidth: 1,
+
     borderColor: "#3C352D",
+
     borderRadius: 12,
+
     padding: 18,
   },
 
   emptyTitle: {
     color: "#F2E8D5",
+
     fontSize: 16,
+
     fontWeight: "600",
   },
 
   emptyDescription: {
     color: "#A99F91",
+
     fontSize: 13,
+
     lineHeight: 19,
+
     marginTop: 5,
   },
 
@@ -630,305 +1025,437 @@ const styles = StyleSheet.create({
 
   questCard: {
     backgroundColor: "#1C1916",
+
     borderWidth: 1,
+
     borderColor: "#594A32",
+
     borderRadius: 14,
+
     padding: 18,
   },
 
   completedQuestCard: {
     backgroundColor: "#171612",
+
     borderWidth: 1,
+
     borderColor: "#3C352D",
+
     borderRadius: 14,
+
     padding: 18,
   },
 
   questTitle: {
     color: "#F2E8D5",
+
     fontSize: 18,
+
     fontWeight: "700",
   },
 
   questDescription: {
     color: "#A99F91",
+
     fontSize: 14,
+
     lineHeight: 20,
+
     marginTop: 7,
   },
 
   rewardCard: {
     backgroundColor: "#151310",
+
     borderWidth: 1,
+
     borderColor: "#3C352D",
+
     borderRadius: 10,
+
     padding: 14,
+
     marginTop: 14,
   },
 
   rewardLabel: {
     color: "#81786D",
+
     fontSize: 11,
+
     fontWeight: "700",
+
     textTransform: "uppercase",
   },
 
   rewardValue: {
     color: "#D9A441",
+
     fontSize: 22,
+
     fontWeight: "700",
+
     marginTop: 4,
   },
 
   rewardFund: {
     color: "#A99F91",
+
     fontSize: 12,
+
     marginTop: 4,
   },
 
   completeButton: {
     backgroundColor: "#8B2E2E",
+
     borderRadius: 10,
+
     paddingVertical: 13,
+
     paddingHorizontal: 16,
+
     alignItems: "center",
+
     marginTop: 14,
   },
 
   completeButtonText: {
     color: "#FFFFFF",
+
     fontSize: 14,
+
     fontWeight: "700",
   },
 
   confirmCard: {
     backgroundColor: "#241B12",
+
     borderWidth: 1,
+
     borderColor: "#8A6930",
+
     borderRadius: 10,
+
     padding: 14,
+
     marginTop: 14,
   },
 
   confirmTitle: {
     color: "#D9A441",
+
     fontSize: 15,
+
     fontWeight: "700",
   },
 
   confirmText: {
     color: "#A99F91",
+
     fontSize: 13,
+
     lineHeight: 19,
+
     marginTop: 5,
   },
 
   confirmButtons: {
     flexDirection: "row",
+
     flexWrap: "wrap",
+
     gap: 8,
   },
 
   cancelButton: {
     flexGrow: 1,
+
     borderWidth: 1,
+
     borderColor: "#81786D",
+
     borderRadius: 9,
+
     paddingVertical: 12,
+
     alignItems: "center",
+
     marginTop: 14,
   },
 
   cancelButtonText: {
     color: "#A99F91",
+
     fontSize: 14,
+
     fontWeight: "600",
   },
 
   label: {
     color: "#F2E8D5",
+
     fontSize: 14,
+
     marginTop: 16,
+
     marginBottom: 7,
   },
 
   sectionLabel: {
     color: "#F2E8D5",
+
     fontSize: 14,
+
     marginTop: 18,
+
     marginBottom: 8,
   },
 
   input: {
     backgroundColor: "#1C1916",
+
     borderWidth: 1,
+
     borderColor: "#3C352D",
+
     borderRadius: 10,
+
     color: "#F2E8D5",
+
     fontSize: 16,
+
     paddingHorizontal: 14,
+
     paddingVertical: 13,
   },
 
   descriptionInput: {
     minHeight: 90,
+
     textAlignVertical: "top",
   },
 
   currencySelector: {
     flexDirection: "row",
+
     flexWrap: "wrap",
+
     gap: 8,
   },
 
   optionButton: {
     backgroundColor: "#1C1916",
+
     borderWidth: 1,
+
     borderColor: "#4B4339",
+
     borderRadius: 10,
+
     paddingHorizontal: 16,
+
     paddingVertical: 11,
   },
 
   optionButtonSelected: {
     backgroundColor: "#2A2115",
+
     borderColor: "#D9A441",
   },
 
   optionText: {
     color: "#B9AFA2",
+
     fontSize: 14,
   },
 
   optionTextSelected: {
     color: "#D9A441",
+
     fontWeight: "700",
   },
 
   helperText: {
     color: "#81786D",
+
     fontSize: 12,
+
     lineHeight: 18,
+
     marginTop: 6,
   },
 
   primaryButton: {
     backgroundColor: "#8B2E2E",
+
     borderRadius: 11,
+
     paddingVertical: 15,
+
     paddingHorizontal: 18,
+
     alignItems: "center",
+
     marginTop: 16,
   },
 
   primaryButtonText: {
     color: "#FFFFFF",
+
     fontSize: 16,
+
     fontWeight: "700",
   },
 
   endButton: {
     borderWidth: 1,
+
     borderColor: "#C96A6A",
+
     borderRadius: 11,
+
     paddingVertical: 14,
+
     alignItems: "center",
+
     marginTop: 18,
   },
 
   endButtonText: {
     color: "#C96A6A",
+
     fontSize: 15,
+
     fontWeight: "700",
   },
 
   permissionCard: {
     backgroundColor: "#171612",
+
     borderRadius: 10,
+
     padding: 13,
+
     marginTop: 14,
   },
 
   permissionText: {
     color: "#A99F91",
+
     fontSize: 13,
+
     lineHeight: 19,
   },
 
   errorCard: {
     backgroundColor: "#2B1717",
+
     borderWidth: 1,
+
     borderColor: "#8B2E2E",
+
     borderRadius: 10,
+
     padding: 14,
+
     marginTop: 16,
   },
 
   errorTitle: {
     color: "#E08A8A",
+
     fontSize: 14,
+
     fontWeight: "700",
   },
 
   errorText: {
     color: "#D8B5B5",
+
     fontSize: 13,
+
     lineHeight: 19,
+
     marginTop: 4,
   },
 
   successCard: {
     backgroundColor: "#182417",
+
     borderWidth: 1,
+
     borderColor: "#54734A",
+
     borderRadius: 10,
+
     padding: 14,
+
     marginTop: 16,
   },
 
   successTitle: {
     color: "#9CC58B",
+
     fontSize: 14,
+
     fontWeight: "700",
   },
 
   successText: {
     color: "#C3D7BB",
+
     fontSize: 13,
+
     lineHeight: 19,
+
     marginTop: 4,
   },
 
   completedLabel: {
     color: "#8FB573",
+
     fontSize: 11,
+
     fontWeight: "800",
+
     marginTop: 9,
   },
 
   completedReward: {
     color: "#D9A441",
+
     fontSize: 14,
+
     fontWeight: "600",
+
     marginTop: 5,
   },
 
   completedDate: {
     color: "#81786D",
+
     fontSize: 11,
+
     marginTop: 5,
   },
 
   centered: {
     flex: 1,
+
     justifyContent: "center",
+
     alignItems: "center",
+
     padding: 24,
   },
 
   notFoundTitle: {
     color: "#F2E8D5",
+
     fontSize: 24,
+
     fontWeight: "700",
   },
 });

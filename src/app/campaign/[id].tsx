@@ -70,9 +70,6 @@ export default function CampaignDashboardScreen() {
     focusModeActive &&
     activeMember?.role !== "dm";
 
-  /*
-   * PLAYER FOCUS MODE DASHBOARD
-   */
   if (isFocusRestrictedPlayer) {
     const focusMessage =
       activeSession?.focusMessage?.trim() || DEFAULT_FOCUS_MODE_MESSAGE;
@@ -187,6 +184,25 @@ export default function CampaignDashboardScreen() {
             </Text>
           </Pressable>
 
+          <Pressable
+            style={styles.focusNotesButton}
+            onPress={() =>
+              router.push({
+                pathname: "/campaign/[id]/notes",
+
+                params: {
+                  id: campaign.id,
+                },
+              })
+            }
+          >
+            <Text style={styles.focusNotesButtonTitle}>Notes</Text>
+
+            <Text style={styles.focusNotesButtonDescription}>
+              View or write personal campaign notes
+            </Text>
+          </Pressable>
+
           {__DEV__ ? (
             <View style={styles.developmentCard}>
               <Text style={styles.developmentLabel}>DEVELOPMENT TESTING</Text>
@@ -224,10 +240,6 @@ export default function CampaignDashboardScreen() {
       </SafeAreaView>
     );
   }
-
-  /*
-   * NORMAL CAMPAIGN DASHBOARD
-   */
 
   const walletRequests = getCampaignWalletRequests(campaign.id);
 
@@ -674,7 +686,19 @@ export default function CampaignDashboardScreen() {
 
           <NavigationButton title="Assets" description="View valuable items" />
 
-          <NavigationButton title="Notes" description="View campaign notes" />
+          <NavigationButton
+            title="Notes"
+            description="Create and manage personal campaign notes"
+            onPress={() =>
+              router.push({
+                pathname: "/campaign/[id]/notes",
+
+                params: {
+                  id: campaign.id,
+                },
+              })
+            }
+          />
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -997,6 +1021,30 @@ const styles = StyleSheet.create({
 
   focusMessageButtonDescription: {
     color: "#E2CFCF",
+    fontSize: 12,
+    lineHeight: 18,
+    textAlign: "center",
+    marginTop: 5,
+  },
+
+  focusNotesButton: {
+    backgroundColor: "#1C1916",
+    borderWidth: 1,
+    borderColor: "#D9A441",
+    borderRadius: 14,
+    padding: 18,
+    marginTop: 12,
+  },
+
+  focusNotesButtonTitle: {
+    color: "#D9A441",
+    fontSize: 17,
+    fontWeight: "700",
+    textAlign: "center",
+  },
+
+  focusNotesButtonDescription: {
+    color: "#A99F91",
     fontSize: 12,
     lineHeight: 18,
     textAlign: "center",

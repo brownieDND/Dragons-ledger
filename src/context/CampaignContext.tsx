@@ -1,4 +1,12 @@
-import { createContext, ReactNode, useContext, useState } from "react";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+
+import {
+  createContext,
+  ReactNode,
+  useContext,
+  useEffect,
+  useState,
+} from "react";
 
 import {
   Campaign,
@@ -30,61 +38,100 @@ import { CampaignSession } from "../models/Session";
 
 import { CampaignQuest, NewCampaignQuest } from "../models/Quest";
 
+const STORAGE_KEY = "@dragons-ledger/app-state";
+const STORAGE_VERSION = 1;
+
+interface PersistedCampaignState {
+  version: number;
+
+  campaigns: Campaign[];
+
+  transactions: Transaction[];
+
+  rewards: RewardDistribution[];
+
+  sessions: CampaignSession[];
+
+  quests: CampaignQuest[];
+}
+
 interface NewCampaign {
   name: string;
+
   characterName: string;
+
   gameSystem: GameSystem;
+
   campaignType: CampaignType;
 }
 
 interface NewCampaignMember {
   campaignId: string;
+
   displayName: string;
+
   characterName?: string;
+
   role: CampaignMemberRole;
 }
 
 interface TransactionResult {
   success: boolean;
+
   message?: string;
+
   transaction?: Transaction;
 }
 
 interface PartyFundContributionResult {
   success: boolean;
+
   message?: string;
+
   characterTransaction?: Transaction;
+
   partyFundTransaction?: Transaction;
 }
 
 interface CampaignMemberResult {
   success: boolean;
+
   message?: string;
+
   member?: CampaignMember;
 }
 
 interface ActiveMemberResult {
   success: boolean;
+
   message?: string;
+
   member?: CampaignMember;
 }
 
 interface SessionResult {
   success: boolean;
+
   message?: string;
+
   session?: CampaignSession;
 }
 
 interface QuestResult {
   success: boolean;
+
   message?: string;
+
   quest?: CampaignQuest;
 }
 
 interface QuestCompletionResult {
   success: boolean;
+
   message?: string;
+
   quest?: CampaignQuest;
+
   reward?: RewardDistribution;
 }
 
@@ -98,6 +145,8 @@ interface CampaignContextType {
   sessions: CampaignSession[];
 
   quests: CampaignQuest[];
+
+  storageError: string | null;
 
   createCampaign: (campaign: NewCampaign) => Campaign;
 
@@ -158,6 +207,125 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
 
   const [quests, setQuests] = useState<CampaignQuest[]>([]);
 
+  const [isHydrated, setIsHydrated] = useState(false);
+
+  const [storageError, setStorageError] = useState<string | null>(null);
+
+  /*
+   * Load the saved application state once
+   * when the provider first starts.
+   *
+   * Saving is disabled until hydration
+   * finishes so the initial empty arrays
+   * cannot overwrite existing saved data.
+   */
+  useEffect(() => {
+    let cancelled = false;
+
+    async function hydrateState() {
+      try {
+        const storedValue = await AsyncStorage.getItem(STORAGE_KEY);
+
+        if (!storedValue) {
+          return;
+        }
+
+        const parsed = JSON.parse(
+          storedValue,
+        ) as Partial<PersistedCampaignState>;
+
+        if (parsed.version !== STORAGE_VERSION) {
+          throw new Error(
+            `Unsupported Dragon's Ledger storage version: ${String(
+              parsed.version,
+            )}`,
+          );
+        }
+
+        if (cancelled) {
+          return;
+        }
+
+        setCampaigns(Array.isArray(parsed.campaigns) ? parsed.campaigns : []);
+
+        setTransactions(
+          Array.isArray(parsed.transactions) ? parsed.transactions : [],
+        );
+
+        setRewards(Array.isArray(parsed.rewards) ? parsed.rewards : []);
+
+        setSessions(Array.isArray(parsed.sessions) ? parsed.sessions : []);
+
+        setQuests(Array.isArray(parsed.quests) ? parsed.quests : []);
+
+        setStorageError(null);
+      } catch (error) {
+        console.error("Failed to load Dragon's Ledger data:", error);
+
+        if (!cancelled) {
+          setStorageError("Saved Dragon's Ledger data could not be loaded.");
+        }
+      } finally {
+        if (!cancelled) {
+          setIsHydrated(true);
+        }
+      }
+    }
+
+    void hydrateState();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  /*
+   * Automatically save whenever one of the
+   * persistent sections of app state changes.
+   */
+  useEffect(() => {
+    if (!isHydrated) {
+      return;
+    }
+
+    const savedState: PersistedCampaignState = {
+      version: STORAGE_VERSION,
+
+      campaigns,
+
+      transactions,
+
+      rewards,
+
+      sessions,
+
+      quests,
+    };
+
+    /*
+     * Small debounce prevents several related
+     * state updates from causing unnecessary
+     * back-to-back writes.
+     */
+    const saveTimer = setTimeout(() => {
+      AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(savedState))
+        .then(() => {
+          setStorageError(null);
+        })
+        .catch((error) => {
+          console.error("Failed to save Dragon's Ledger data:", error);
+
+          setStorageError(
+            "Dragon's Ledger could not save your latest changes.",
+          );
+        });
+    }, 100);
+
+    return () => {
+      clearTimeout(saveTimer);
+    };
+  }, [isHydrated, campaigns, transactions, rewards, sessions, quests]);
+
   function createCampaign(newCampaign: NewCampaign): Campaign {
     const currencySystem = getDefaultCurrencySystem(newCampaign.gameSystem);
 
@@ -165,7 +333,9 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
 
     const character = {
       id: createId(),
+
       name: newCampaign.characterName,
+
       wallet: createEmptyWallet(currencySystem),
     };
 
@@ -241,6 +411,7 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     if (!campaign) {
       return {
         success: false,
+
         message: "Campaign not found.",
       };
     }
@@ -250,6 +421,7 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     if (!member) {
       return {
         success: false,
+
         message: "Campaign member not found.",
       };
     }
@@ -272,6 +444,7 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
 
     return {
       success: true,
+
       member,
     };
   }
@@ -284,6 +457,7 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     if (!campaign) {
       return {
         success: false,
+
         message: "Campaign not found.",
       };
     }
@@ -291,6 +465,7 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     if (campaign.campaignType === "solo") {
       return {
         success: false,
+
         message: "Members cannot be added to a solo campaign.",
       };
     }
@@ -302,6 +477,7 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     if (!displayName) {
       return {
         success: false,
+
         message: "Enter a player name.",
       };
     }
@@ -309,6 +485,7 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     if (newMember.role !== "dm" && !characterName) {
       return {
         success: false,
+
         message: "Players must have a character name.",
       };
     }
@@ -319,6 +496,7 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     ) {
       return {
         success: false,
+
         message: "This campaign already has a DM.",
       };
     }
@@ -329,6 +507,7 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     ) {
       return {
         success: false,
+
         message: "This campaign already has a Party Leader.",
       };
     }
@@ -339,6 +518,7 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     ) {
       return {
         success: false,
+
         message: "This campaign already has a Treasurer.",
       };
     }
@@ -382,6 +562,7 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
 
     return {
       success: true,
+
       member,
     };
   }
@@ -396,6 +577,7 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     if (!campaign) {
       return {
         success: false,
+
         message: "Campaign not found.",
       };
     }
@@ -407,6 +589,7 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     if (!activeMember) {
       return {
         success: false,
+
         message: "Active campaign member not found.",
       };
     }
@@ -414,6 +597,7 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     if (!activeMember.character) {
       return {
         success: false,
+
         message: "The active member does not have a character wallet.",
       };
     }
@@ -421,6 +605,7 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     if (activeMember.character.id !== newTransaction.characterId) {
       return {
         success: false,
+
         message:
           "You can only record transactions for the active member's character.",
       };
@@ -433,6 +618,7 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     if (!currency) {
       return {
         success: false,
+
         message: "Currency not found.",
       };
     }
@@ -444,12 +630,14 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     if (!currentBalance) {
       return {
         success: false,
+
         message: "Wallet balance not found.",
       };
     }
 
     const signedAmount = normalizeTransactionAmount(
       newTransaction.type,
+
       newTransaction.amount,
     );
 
@@ -458,6 +646,7 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     if (newBalance < 0) {
       return {
         success: false,
+
         message: `Not enough ${currency.abbreviation}.`,
       };
     }
@@ -538,11 +727,13 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
 
     setTransactions((currentTransactions) => [
       transaction,
+
       ...currentTransactions,
     ]);
 
     return {
       success: true,
+
       transaction,
     };
   }
@@ -557,6 +748,7 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     if (!campaign) {
       return {
         success: false,
+
         message: "Campaign not found.",
       };
     }
@@ -568,6 +760,7 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     if (!activeMember) {
       return {
         success: false,
+
         message: "Active campaign member not found.",
       };
     }
@@ -592,6 +785,7 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     if (!currency) {
       return {
         success: false,
+
         message: "Currency not found.",
       };
     }
@@ -603,12 +797,14 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     if (!currentBalance) {
       return {
         success: false,
+
         message: "Party Fund balance not found.",
       };
     }
 
     const signedAmount = normalizeTransactionAmount(
       newTransaction.type,
+
       newTransaction.amount,
     );
 
@@ -676,11 +872,13 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
 
     setTransactions((currentTransactions) => [
       transaction,
+
       ...currentTransactions,
     ]);
 
     return {
       success: true,
+
       transaction,
     };
   }
@@ -696,6 +894,7 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     if (!campaign) {
       return {
         success: false,
+
         message: "Campaign not found.",
       };
     }
@@ -707,6 +906,7 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     if (!activeMember) {
       return {
         success: false,
+
         message: "Active campaign member not found.",
       };
     }
@@ -735,6 +935,7 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     if (!currency) {
       return {
         success: false,
+
         message: "Currency not found.",
       };
     }
@@ -746,6 +947,7 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     if (!characterBalance) {
       return {
         success: false,
+
         message: "Character wallet balance not found.",
       };
     }
@@ -765,6 +967,7 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     if (!partyFundBalance) {
       return {
         success: false,
+
         message: "Party Fund balance not found.",
       };
     }
@@ -891,13 +1094,17 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
 
     setTransactions((currentTransactions) => [
       partyFundTransaction,
+
       characterTransaction,
+
       ...currentTransactions,
     ]);
 
     return {
       success: true,
+
       characterTransaction,
+
       partyFundTransaction,
     };
   }
@@ -910,6 +1117,7 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     if (!campaign) {
       return {
         success: false,
+
         message: "Campaign not found.",
       };
     }
@@ -921,6 +1129,7 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     if (!activeMember) {
       return {
         success: false,
+
         message: "Active campaign member not found.",
       };
     }
@@ -964,6 +1173,7 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     if (!currency) {
       return {
         success: false,
+
         message: "Currency not found.",
       };
     }
@@ -1163,6 +1373,7 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
 
     setTransactions((currentTransactions) => [
       ...newTransactions,
+
       ...currentTransactions,
     ]);
 
@@ -1170,6 +1381,7 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
 
     return {
       success: true,
+
       reward,
     };
   }
@@ -1180,6 +1392,7 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     if (!campaign) {
       return {
         success: false,
+
         message: "Campaign not found.",
       };
     }
@@ -1191,6 +1404,7 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     if (!activeMember) {
       return {
         success: false,
+
         message: "Active campaign member not found.",
       };
     }
@@ -1198,6 +1412,7 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     if (campaign.campaignType === "multiplayer" && activeMember.role !== "dm") {
       return {
         success: false,
+
         message: "Only the Dungeon Master can start a session.",
       };
     }
@@ -1210,6 +1425,7 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     if (existingSession) {
       return {
         success: false,
+
         message: "This campaign already has an active session.",
       };
     }
@@ -1230,6 +1446,7 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
 
     return {
       success: true,
+
       session,
     };
   }
@@ -1240,6 +1457,7 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     if (!campaign) {
       return {
         success: false,
+
         message: "Campaign not found.",
       };
     }
@@ -1251,6 +1469,7 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     if (!activeMember) {
       return {
         success: false,
+
         message: "Active campaign member not found.",
       };
     }
@@ -1258,6 +1477,7 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     if (campaign.campaignType === "multiplayer" && activeMember.role !== "dm") {
       return {
         success: false,
+
         message: "Only the Dungeon Master can end a session.",
       };
     }
@@ -1270,6 +1490,7 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     if (!activeSession) {
       return {
         success: false,
+
         message: "There is no active session to end.",
       };
     }
@@ -1290,6 +1511,7 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
 
     return {
       success: true,
+
       session: endedSession,
     };
   }
@@ -1316,6 +1538,7 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     if (!campaign) {
       return {
         success: false,
+
         message: "Campaign not found.",
       };
     }
@@ -1327,6 +1550,7 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     if (!activeMember) {
       return {
         success: false,
+
         message: "Active campaign member not found.",
       };
     }
@@ -1334,6 +1558,7 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     if (campaign.campaignType === "multiplayer" && activeMember.role !== "dm") {
       return {
         success: false,
+
         message: "Only the Dungeon Master can create quests.",
       };
     }
@@ -1343,6 +1568,7 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     if (!activeSession) {
       return {
         success: false,
+
         message: "Start a session before creating a quest.",
       };
     }
@@ -1352,6 +1578,7 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     if (!title) {
       return {
         success: false,
+
         message: "Enter a quest title.",
       };
     }
@@ -1362,6 +1589,7 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     ) {
       return {
         success: false,
+
         message: "Quest reward must be a whole number greater than zero.",
       };
     }
@@ -1373,6 +1601,7 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     ) {
       return {
         success: false,
+
         message: "Party Fund percentage must be between 0 and 100.",
       };
     }
@@ -1384,6 +1613,7 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     if (!currency) {
       return {
         success: false,
+
         message: "Quest reward currency not found.",
       };
     }
@@ -1416,6 +1646,7 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
 
     return {
       success: true,
+
       quest,
     };
   }
@@ -1429,6 +1660,7 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     if (!campaign) {
       return {
         success: false,
+
         message: "Campaign not found.",
       };
     }
@@ -1440,6 +1672,7 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     if (!activeMember) {
       return {
         success: false,
+
         message: "Active campaign member not found.",
       };
     }
@@ -1447,6 +1680,7 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     if (campaign.campaignType === "multiplayer" && activeMember.role !== "dm") {
       return {
         success: false,
+
         message: "Only the Dungeon Master can complete quests.",
       };
     }
@@ -1456,6 +1690,7 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     if (!activeSession) {
       return {
         success: false,
+
         message: "A session must be active before completing a quest.",
       };
     }
@@ -1467,6 +1702,7 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     if (!quest) {
       return {
         success: false,
+
         message: "Quest not found.",
       };
     }
@@ -1474,6 +1710,7 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     if (quest.status === "completed") {
       return {
         success: false,
+
         message: "This quest has already been completed.",
       };
     }
@@ -1556,6 +1793,14 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
       );
   }
 
+  /*
+   * Do not mount the rest of the application
+   * until we know whether saved data exists.
+   */
+  if (!isHydrated) {
+    return null;
+  }
+
   return (
     <CampaignContext.Provider
       value={{
@@ -1568,6 +1813,8 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
         sessions,
 
         quests,
+
+        storageError,
 
         createCampaign,
 

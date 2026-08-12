@@ -56,6 +56,21 @@ export default function TransactionScreen() {
     );
   }
 
+  function handleBackToCampaign() {
+    if (router.canGoBack()) {
+      router.back();
+
+      return;
+    }
+
+    router.replace({
+      pathname: "/campaign/[id]",
+      params: {
+        id: campaign.id,
+      },
+    });
+  }
+
   const activeMember = getActiveCampaignMember(campaign.id);
 
   const character = activeMember?.character;
@@ -66,7 +81,10 @@ export default function TransactionScreen() {
         <View style={styles.notFound}>
           <Text style={styles.notFoundTitle}>Active member not found</Text>
 
-          <Pressable style={styles.primaryButton} onPress={() => router.back()}>
+          <Pressable
+            style={styles.primaryButton}
+            onPress={handleBackToCampaign}
+          >
             <Text style={styles.primaryButtonText}>Return to Campaign</Text>
           </Pressable>
         </View>
@@ -85,7 +103,10 @@ export default function TransactionScreen() {
             this campaign.
           </Text>
 
-          <Pressable style={styles.primaryButton} onPress={() => router.back()}>
+          <Pressable
+            style={styles.primaryButton}
+            onPress={handleBackToCampaign}
+          >
             <Text style={styles.primaryButtonText}>Return to Campaign</Text>
           </Pressable>
         </View>
@@ -179,10 +200,15 @@ export default function TransactionScreen() {
 
     const result = createTransaction({
       campaignId: campaign.id,
+
       characterId: character.id,
+
       type: transactionType,
+
       currencyId,
+
       amount: transactionAmount,
+
       description: description.trim(),
     });
 
@@ -194,7 +220,7 @@ export default function TransactionScreen() {
       return;
     }
 
-    router.back();
+    handleBackToCampaign();
   }
 
   return (

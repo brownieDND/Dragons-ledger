@@ -3,13 +3,13 @@ import { router, useLocalSearchParams } from "expo-router";
 import { useState } from "react";
 
 import {
-    Pressable,
-    SafeAreaView,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    View,
+  Pressable,
+  SafeAreaView,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
 } from "react-native";
 
 import { useCampaigns } from "../../../context/CampaignContext";
@@ -23,19 +23,12 @@ export default function SessionScreen() {
 
   const {
     getCampaignById,
-
     getActiveCampaignMember,
-
     getActiveSession,
-
     getCampaignQuests,
-
     startSession,
-
     endSession,
-
     createQuest,
-
     completeQuest,
   } = useCampaigns();
 
@@ -95,6 +88,21 @@ export default function SessionScreen() {
     (a, b) => b.displayOrder - a.displayOrder,
   );
 
+  function handleBack() {
+    if (router.canGoBack()) {
+      router.back();
+
+      return;
+    }
+
+    router.replace({
+      pathname: "/campaign/[id]",
+      params: {
+        id: campaign.id,
+      },
+    });
+  }
+
   function clearMessages() {
     setErrorMessage("");
     setSuccessMessage("");
@@ -141,15 +149,10 @@ export default function SessionScreen() {
 
     const result = createQuest({
       campaignId: campaign.id,
-
       title,
-
       description,
-
       currencyId,
-
       rewardAmount: numericReward,
-
       partyFundPercentage: numericPercentage,
     });
 
@@ -198,7 +201,7 @@ export default function SessionScreen() {
         contentContainerStyle={styles.content}
         keyboardShouldPersistTaps="handled"
       >
-        <Pressable onPress={() => router.back()}>
+        <Pressable onPress={handleBack}>
           <Text style={styles.backText}>← Campaign</Text>
         </Pressable>
 

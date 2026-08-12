@@ -56,6 +56,21 @@ export default function CampaignMembersScreen() {
     (member) => member.id === campaign.activeMemberId,
   );
 
+  function handleBack() {
+    if (router.canGoBack()) {
+      router.back();
+
+      return;
+    }
+
+    router.replace({
+      pathname: "/campaign/[id]",
+      params: {
+        id: campaign.id,
+      },
+    });
+  }
+
   function handleAddMember() {
     const result = addCampaignMember({
       campaignId: campaign.id,
@@ -107,7 +122,7 @@ export default function CampaignMembersScreen() {
         contentContainerStyle={styles.content}
         keyboardShouldPersistTaps="handled"
       >
-        <Pressable onPress={() => router.back()}>
+        <Pressable onPress={handleBack}>
           <Text style={styles.backText}>← Campaign</Text>
         </Pressable>
 
